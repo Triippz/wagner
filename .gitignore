@@ -1,0 +1,10 @@
+# Rust
+target/
+# JS/TS
+node_modules/
+*.tsbuildinfo
+# Local edge stores / run logs (never committed)
+.surrealdb/
+.wagner/
+# Deno
+deno.lock.tmp

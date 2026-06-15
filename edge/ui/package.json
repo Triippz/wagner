@@ -1,0 +1,14 @@
+{
+  "name": "@wagner/edge-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Edge Tauri frontend (ported store/bridge; consumes @wagner/shared). The wedge's interactive touches (mark-shareable, recall surfacing) land in a starter native Rust TUI; this TS surface is the carried GUI.",
+  "dependencies": {
+    "@wagner/shared": "*"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@wagner/platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wagner platform wedge — shared spine (schemas + reducer), edge UI, hub. Self-contained under platform/ (Article VII: nothing outside platform/ imports it).",
+  "workspaces": [
+    "shared",
+    "edge/ui"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "test:shared": "npm run test -w @wagner/shared",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3",
+    "vitest": "^4.1.8"
+  }
+}

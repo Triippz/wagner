@@ -1,0 +1,19 @@
+# Wagner platform — Rust workspace (edge layer).
+# Virtual manifest: explicit members only (no auto-glob). The starter native TUI
+# (ratatui/crossterm) will be added as a sibling member when US1/US2 UI touches land.
+[workspace]
+resolver = "2"
+members = ["edge/host"]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.0"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+ulid = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+tempfile = "3"

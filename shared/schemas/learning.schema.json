@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Learning",
+  "description": "A durable, operator-authored lesson from a run (the carried MemoryRecord shape with user_id->operator_id). This is the LOCAL record; it keeps the local project_id (B2) and may be in any curation_state. The edge->hub payload (sync-learning.schema.json) is the curated subset keyed by project_key. The curation_state enum and the 8 KiB text cap are wedge-introduced (B1, EC-001/CL-7) — the carried field was an open string only ever set to \"auto\".",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "uid",
+    "operator_id",
+    "project_id",
+    "text",
+    "created_at",
+    "curation_state"
+  ],
+  "properties": {
+    "schema": {
+      "const": "wagner-learning.v1"
+    },
+    "uid": {
+      "type": "string",
+      "description": "ULID — the learning's stable id and the hub upsert idempotency key"
+    },
+    "operator_id": {
+      "type": "string",
+      "description": "Verified operator the learning is attributed to (carried user_id renamed; D-STORE-3, FR-001). On the local record before sync this may be the single-tenant default."
+    },
+    "project_id": {
+      "type": "string",
+      "description": "Local project handle (the on-disk path — carried commands.rs:404). The shared cross-operator project_key (normalized git remote, B2) is derived at the sync/enroll boundary, not stored here."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192,
+      "description": "The lesson. Capped at 8 KiB (EC-001/CL-7) — an oversize save is rejected, never truncated. maxLength is a character bound; the byte-precise check is edge-side (T019d)."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional normalized tags used by recall (carried; defaults to [])"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC-3339 (…Z, no sub-seconds) — matches the carried atomic-write convention so lexicographic ordering is chronological"
+    },
+    "curation_state": {
+      "enum": ["auto", "captured", "curated"],
+      "description": "Shareability lifecycle (B1, wedge-introduced): auto (machine-suggested, local) and captured (operator-authored, local) never sync; only curated (operator explicitly marked shareable) syncs (D-DATA-3, FR-011)."
+    },
+    "source_type": {
+      "type": "string",
+      "description": "Carried provenance hint (default \"\"); not synced to the hub"
+    },
+    "source_ref": {
+      "type": "string",
+      "description": "Carried provenance ref (default \"\"); not synced to the hub"
+    }
+  }
+}

@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Run",
+  "description": "Persisted state of one goal-loop execution. Written atomically each iteration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "goal",
+    "docs",
+    "status",
+    "iteration",
+    "guardrails",
+    "created_at",
+    "subtasks",
+    "transmissions",
+    "console_inputs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "wagner-run.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "ULID"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "docs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "enum": [
+        "drafted",
+        "running",
+        "met",
+        "halted_guardrail",
+        "aborted",
+        "paused"
+      ]
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "phase": {
+      "enum": [
+        "idle",
+        "planning",
+        "dispatching",
+        "judging",
+        "blocked",
+        "met",
+        "halted"
+      ]
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blocked_timeout_secs",
+        "cost"
+      ],
+      "properties": {
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "iterations_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked_timeout_secs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cost": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "cli_usage",
+                "wallclock"
+              ]
+            },
+            "budget": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "used": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "halt_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "iterations",
+        "cost",
+        "blocked_timeout",
+        null
+      ]
+    },
+    "subtasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/subtask"
+      }
+    },
+    "transmissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "transmission ids"
+      }
+    },
+    "console_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ts",
+          "text"
+        ],
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "subtask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "agent_id",
+        "prompt",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "agent_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "id of the hired-roster agent this subtask was dispatched to"
+        },
+        "assignment_rationale": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "done",
+            "failed"
+          ]
+        },
+        "worktree": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result_summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@wagner/hub",
+  "version": "0.0.0",
+  "tasks": {
+    "dev": "deno run -A --watch src/main.ts",
+    "test": "deno test -A --no-check=remote"
+  },
+  "lock": false,
+  "imports": {
+    "@wagner/shared/": "../shared/"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.window", "esnext"]
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "semiColons": true
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@wagner/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Carried spine: canonical JSON Schemas + pure reducers (UI projection + event-sourced run spine). No I/O, no UI dependency.",
+  "exports": {
+    "./reducer": "./reducer/index.ts",
+    "./run-reducer": "./reducer/run-reducer.ts",
+    "./run-events": "./reducer/run-events.ts",
+    "./schemas/*": "./schemas/*"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
