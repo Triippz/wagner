@@ -14,7 +14,7 @@ fn client(id: &str) -> ControlOrigin {
 #[tokio::test]
 async fn first_answer_wins_second_is_a_noop() {
     let reg = TransmissionRegistry::default();
-    let rx = reg.open("tx-1".into());
+    let rx = reg.open("tx-1");
 
     // Client A answers ALLOW first.
     let a = route_control(

@@ -18,7 +18,7 @@ fn remote() -> ControlOrigin {
 #[tokio::test]
 async fn remote_permission_answer_advances_the_run_and_is_attributed() {
     let reg = TransmissionRegistry::default();
-    let rx = reg.open("tx-1".into());
+    let rx = reg.open("tx-1");
     let outcome = route_control(
         &reg,
         &remote(),
@@ -36,7 +36,7 @@ async fn remote_permission_answer_advances_the_run_and_is_attributed() {
 #[test]
 fn a_remote_deny_is_a_deny_identically_to_local() {
     let reg = TransmissionRegistry::default();
-    let _rx = reg.open("tx-2".into());
+    let _rx = reg.open("tx-2");
     let remote_out = route_control(
         &reg,
         &remote(),
@@ -45,7 +45,7 @@ fn a_remote_deny_is_a_deny_identically_to_local() {
     assert_eq!(remote_out.gate_decision, Some(Decision::Deny));
 
     let reg2 = TransmissionRegistry::default();
-    let _rx2 = reg2.open("tx-2".into());
+    let _rx2 = reg2.open("tx-2");
     let local_out = route_control(
         &reg2,
         &ControlOrigin::Local,

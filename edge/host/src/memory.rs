@@ -73,17 +73,6 @@ pub struct MemoryStore {
     user_id: String,
 }
 
-/// Errors the store surfaces to callers. User-input validation is expressed as
-/// `InvalidInput` rather than borrowing a SurrealDB-internal error variant, so the
-/// module is not coupled to the DB engine's error taxonomy for its own rules.
-#[derive(Debug, thiserror::Error)]
-pub enum StoreError {
-    #[error("invalid input: {0}")]
-    InvalidInput(String),
-    #[error(transparent)]
-    Db(#[from] surrealdb::Error),
-}
-
 /// Stable id from a name (template ids, memory slugs).
 pub fn slug(name: &str) -> String {
     let s: String = name
@@ -111,6 +100,17 @@ pub fn memory_markdown(rec: &MemoryRecord) -> String {
         curation = q(&rec.curation_state),
         text = rec.text,
     )
+}
+
+/// Errors the store surfaces to callers. User-input validation is expressed as
+/// `InvalidInput` rather than borrowing a SurrealDB-internal error variant, so the
+/// module is not coupled to the DB engine's error taxonomy for its own rules.
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+    #[error(transparent)]
+    Db(#[from] surrealdb::Error),
 }
 
 impl MemoryStore {
@@ -181,6 +181,33 @@ impl MemoryStore {
         // field when deserializing into `MemoryRecord`.
         let rows: Vec<MemoryRecord> = res.take(0)?;
         Ok(rows)
+    }
+
+    /// The "PRIOR LEARNINGS" block to fold into a run/workflow goal: the most
+    /// recent learnings for a project as a bullet list, or `None` if there are
+    /// none (or recall failed). Shared read side of the recall loop used by both
+    /// `start_run` and `start_workflow`.
+    pub async fn recall_block(&self, project_id: &str, limit: usize) -> Option<String> {
+        let learnings = self.recall(project_id, None, limit).await.ok()?;
+        if learnings.is_empty() {
+            return None;
+        }
+        let block = learnings
+            .iter()
+            .map(|m| format!("- {}", m.text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(format!("PRIOR LEARNINGS (from earlier runs):\n{block}"))
+    }
+
+    /// Project a saved learning to git-diffable Markdown under the project's
+    /// `.wagner/memory/`. Best-effort — never fails on an FS hiccup. Owned by the
+    /// store rather than the command handler.
+    pub fn write_markdown_projection(&self, project_dir: &Path, rec: &MemoryRecord) {
+        let mem_dir = project_dir.join(".wagner").join("memory");
+        if std::fs::create_dir_all(&mem_dir).is_ok() {
+            let _ = std::fs::write(mem_dir.join(format!("{}.md", rec.uid)), memory_markdown(rec));
+        }
     }
 
     /// Upsert a workflow template by name (decision #4 — reusable templates).

@@ -135,9 +135,9 @@ pub struct TransmissionRegistry {
 
 impl TransmissionRegistry {
     /// Register a transmission id and get the receiver to await the decision on.
-    pub fn open(&self, id: String) -> oneshot::Receiver<Decision> {
+    pub fn open(&self, id: &str) -> oneshot::Receiver<Decision> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        self.pending.lock().unwrap().insert(id.to_string(), tx);
         rx
     }
 
@@ -234,7 +234,7 @@ mod tests {
     #[tokio::test]
     async fn registry_round_trips_a_decision() {
         let reg = TransmissionRegistry::default();
-        let rx = reg.open("t1".into());
+        let rx = reg.open("t1");
         assert_eq!(reg.open_count(), 1);
         assert!(reg.answer("t1", Decision::Allow));
         assert_eq!(rx.await.unwrap(), Decision::Allow);

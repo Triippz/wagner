@@ -116,7 +116,7 @@ pub fn scan_catalog(project_dir: &Path) -> Vec<AgentIdentity> {
         let home = PathBuf::from(&home);
 
         // Global ~/.claude/agents
-        scan_agents_from_dir(
+        scan_agents_from_dir_with_prefix(
             &home.join(".claude").join("agents"),
             "global",
             &mut out,
@@ -137,7 +137,7 @@ pub fn scan_catalog(project_dir: &Path) -> Vec<AgentIdentity> {
                 if depth == 1 {
                     let plugin_name = dir_name(&plugin_dir);
                     let origin = format!("plugin:{plugin_name}");
-                    scan_agents_from_dir(
+                    scan_agents_from_dir_with_prefix(
                         &plugin_dir.join("agents"),
                         &origin,
                         &mut out,
@@ -155,7 +155,7 @@ pub fn scan_catalog(project_dir: &Path) -> Vec<AgentIdentity> {
                         }
                         let plugin_name = format!("{}/{}", dir_name(&plugin_dir), dir_name(&child_dir));
                         let origin = format!("plugin:{plugin_name}");
-                        scan_agents_from_dir(
+                        scan_agents_from_dir_with_prefix(
                             &child_dir.join("agents"),
                             &origin,
                             &mut out,
@@ -288,29 +288,6 @@ pub fn default_catalog() -> Vec<AgentIdentity> {
     ]
 }
 
-// ---- codename helpers (retained for potential future use, no longer in scan path) ---
-
-/// Human codenames (kept for back-compat; no longer assigned in scan_catalog).
-const CODENAMES: &[&str] = &[
-    "Sable", "Quill", "Juno", "Rhys", "Mara", "Cole", "Vera", "Idris", "Nova", "Bex", "Tariq",
-    "Lena", "Otis", "Pia", "Knox", "Suri", "Dax", "Wren", "Cleo", "Hugo", "Ines", "Jett", "Kira",
-    "Lior", "Milo", "Nadia", "Orla", "Remy", "Sasha", "Tova", "Uma", "Viktor", "Wade", "Xan",
-    "Yara", "Zane", "Aria", "Bruno", "Coral", "Dmitri", "Esme", "Faris", "Gita", "Hadi", "Iris",
-    "Jonas", "Kemal", "Liv", "Mateo", "Noor", "Oren", "Petra", "Rune", "Sol", "Thea", "Ugo",
-    "Vivi", "Wei", "Yusuf", "Zara",
-];
-
-/// A stable codename for index. Wraps with a numeric suffix when beyond the pool.
-pub fn codename_for(index: usize) -> String {
-    let base = CODENAMES[index % CODENAMES.len()];
-    let wrap = index / CODENAMES.len();
-    if wrap == 0 {
-        base.to_string()
-    } else {
-        format!("{base}-{}", wrap + 1)
-    }
-}
-
 // ---- private helpers ------------------------------------------------------
 
 /// Scan agent `.md` files in a set of relative subdirs under `base`, tagging each
@@ -334,15 +311,6 @@ fn scan_agents_from_roots(
 }
 
 /// Scan a single agents dir. `source_prefix` is prepended to the filename for provenance.
-fn scan_agents_from_dir(
-    dir: &Path,
-    origin: &str,
-    out: &mut Vec<AgentIdentity>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    scan_agents_from_dir_with_prefix(dir, origin, out, seen);
-}
-
 fn scan_agents_from_dir_with_prefix(
     dir: &Path,
     source_prefix: &str,
@@ -592,16 +560,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    #[test]
-    fn codenames_are_distinct_and_wrap_without_collision() {
-        assert_ne!(codename_for(0), codename_for(1));
-        assert_eq!(codename_for(0), CODENAMES[0]);
-        // Beyond the pool, names get a numeric suffix (never collide with the base).
-        let wrapped = codename_for(CODENAMES.len());
-        assert_eq!(wrapped, format!("{}-2", CODENAMES[0]));
-        assert_ne!(wrapped, codename_for(0));
-    }
-
     // ---- NEW: scan_catalog must NOT contain skill ids ----------------------
 
     #[test]
@@ -838,12 +796,6 @@ mod tests {
         let skills = scan_skills_from_roots(&roots);
         let s = skills.iter().find(|s| s.id == "my-skill").unwrap();
         assert_eq!(s.name, "My Skill");
-        // Must NOT be any of the random codenames
-        assert!(
-            !CODENAMES.contains(&s.name.as_str()),
-            "name must not be a codename: {}",
-            s.name
-        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -72,7 +72,7 @@ async fn reopening_folds_the_host_log_to_the_identical_snapshot() {
     let lead = Lead { plan_calls: AtomicUsize::new(0) };
     let worker = Worker;
     let pool = Pool { lead: &lead, worker: &worker };
-    let suite = || SuiteResult { passed: true };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: true } }) };
     let no_steer = Vec::<ConsoleInput>::new;
     let no_halt = || None::<HaltReason>;
 

@@ -1,9 +1,9 @@
 //! Shared balanced-`{…}`-object scanning.
 //!
 //! CLIs wrap their JSON output in prose or ```json fences. The oracle (plan
-//! parse) and judge (goal-met verdict) gates both need to recover the JSON
-//! object(s) from such text. This single string- and escape-aware scanner backs
-//! them, so a fix to the scan reaches every gate.
+//! parse), panel (ui-spec extract), and judge (goal-met verdict) gates all need
+//! to recover the JSON object(s) from such text. This single string- and
+//! escape-aware scanner backs all three, so a fix to the scan reaches every gate.
 
 /// Every top-level balanced `{…}` object substring in `text`, in order.
 pub fn balanced_objects(text: &str) -> Vec<&str> {

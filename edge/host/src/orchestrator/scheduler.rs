@@ -6,9 +6,16 @@
 
 use std::collections::HashSet;
 
-/// Default concurrency cap: min(CPU - 2, 4), floored at 1 (R-ISOLATION).
+/// CPUs held back for the app/UI when sizing the concurrency cap.
+const CPU_RESERVE: usize = 2;
+/// Floor / ceiling on concurrent subtasks (R-ISOLATION).
+const MIN_CONCURRENCY: usize = 1;
+const MAX_CONCURRENCY: usize = 4;
+
+/// Default concurrency cap: min(CPU - CPU_RESERVE, MAX), floored at MIN (R-ISOLATION).
 pub fn default_concurrency(cpus: usize) -> usize {
-    cpus.saturating_sub(2).clamp(1, 4)
+    cpus.saturating_sub(CPU_RESERVE)
+        .clamp(MIN_CONCURRENCY, MAX_CONCURRENCY)
 }
 
 /// Whether two subtasks' declared write-path sets overlap.

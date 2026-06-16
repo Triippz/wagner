@@ -33,7 +33,7 @@ impl EngineOutcome {
         let mut cost = 0.0;
         let mut final_text = String::new();
         for s in &signals {
-            if let CliSignal::Completed { cost_usd, result } = s {
+            if let CliSignal::Completed { cost_usd, result, .. } = s {
                 if let Some(c) = cost_usd {
                     cost += c;
                 }
@@ -67,6 +67,7 @@ mod tests {
             CliSignal::Spawned,
             CliSignal::Completed {
                 cost_usd: Some(0.42),
+                tokens: None,
                 result: "done".into(),
             },
         ];

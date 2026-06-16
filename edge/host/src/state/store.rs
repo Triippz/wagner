@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("io error: {0}")]
-    Io(String),
+    Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]
     Serde(String),
     #[error("schema validation failed: {0}")]
@@ -37,17 +37,16 @@ pub fn save(runs_root: &Path, run: &Run) -> Result<WriteOutcome, StoreError> {
     let dest = run_state_path(runs_root, &run.run_id);
     let existed = dest.exists();
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| StoreError::Io(e.to_string()))?;
+        std::fs::create_dir_all(parent)?;
     }
 
     let tmp = dest.with_extension("json.tmp");
     {
-        let mut f = std::fs::File::create(&tmp).map_err(|e| StoreError::Io(e.to_string()))?;
-        f.write_all(&body)
-            .map_err(|e| StoreError::Io(e.to_string()))?;
-        f.sync_all().map_err(|e| StoreError::Io(e.to_string()))?;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&body)?;
+        f.sync_all()?;
     }
-    std::fs::rename(&tmp, &dest).map_err(|e| StoreError::Io(e.to_string()))?;
+    std::fs::rename(&tmp, &dest)?;
 
     Ok(if existed {
         WriteOutcome::Updated
@@ -59,7 +58,7 @@ pub fn save(runs_root: &Path, run: &Run) -> Result<WriteOutcome, StoreError> {
 /// Load a run, validating it against the schema on read.
 pub fn load(runs_root: &Path, run_id: &str) -> Result<Run, StoreError> {
     let path = run_state_path(runs_root, run_id);
-    let body = std::fs::read_to_string(&path).map_err(|e| StoreError::Io(e.to_string()))?;
+    let body = std::fs::read_to_string(&path)?;
     let value: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| StoreError::Serde(e.to_string()))?;
     schema::validate(RUN_STATE_SCHEMA, &value)?;

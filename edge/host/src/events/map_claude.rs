@@ -21,9 +21,13 @@ pub enum CliSignal {
     },
     /// The CLI paused awaiting a permission/question decision.
     AwaitingInput { prompt: String },
-    /// The run finished; `cost_usd` is the CLI-reported cost when present (FR-015).
+    /// The run finished; `cost_usd` is the CLI-reported USD cost when present
+    /// (Claude), and `tokens` is the CLI-reported token total when present
+    /// (Codex). They are kept distinct so a USD budget is never compared against a
+    /// token count (FR-015).
     Completed {
         cost_usd: Option<f64>,
+        tokens: Option<u64>,
         result: String,
     },
     /// A line we intentionally ignore (hooks, rate-limit notices, etc.).
@@ -73,6 +77,7 @@ pub fn map_claude_line(line: &str) -> CliSignal {
         Some("assistant") => map_assistant(&v),
         Some("result") => CliSignal::Completed {
             cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
+            tokens: None,
             result: v
                 .get("result")
                 .and_then(Value::as_str)
@@ -102,7 +107,7 @@ fn map_assistant(v: &Value) -> CliSignal {
                 .and_then(Value::as_str);
             let activity = tool_to_activity(tool, command);
             let message = Some(match command {
-                Some(c) => format!("{}: {}", tool, truncate(c, 60)),
+                Some(c) => format!("{}: {}", tool, super::truncate(c, 60)),
                 None => tool.to_string(),
             });
             return CliSignal::Activity { activity, message };
@@ -115,21 +120,11 @@ fn map_assistant(v: &Value) -> CliSignal {
             let text = block.get("text").and_then(Value::as_str).unwrap_or("");
             return CliSignal::Activity {
                 activity: Activity::Think,
-                message: Some(truncate(text, 80)),
+                message: Some(super::truncate(text, super::MESSAGE_PREVIEW_MAX)),
             };
         }
     }
     CliSignal::Ignored
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let cut: String = s.chars().take(max).collect();
-        format!("{}…", cut)
-    }
 }
 
 #[cfg(test)]
@@ -153,11 +148,12 @@ mod tests {
         ));
         // result → Completed with the real cost present
         match &signals[2] {
-            CliSignal::Completed { cost_usd, result } => {
+            CliSignal::Completed { cost_usd, tokens, result } => {
                 assert!(
                     cost_usd.unwrap() > 0.0,
                     "real fixture carries total_cost_usd"
                 );
+                assert_eq!(*tokens, None, "Claude reports USD, not a token count");
                 assert_eq!(result, "ok");
             }
             other => panic!("expected Completed, got {:?}", other),

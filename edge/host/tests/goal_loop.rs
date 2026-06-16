@@ -157,7 +157,7 @@ async fn loop_reaches_met_when_plan_suite_and_judge_agree() {
         plan_calls: AtomicUsize::new(0),
     };
     let forger = ScriptedForger;
-    let suite = || SuiteResult { passed: true };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: true } }) };
 
     let pool = TwoAgentPool {
         architect: &architect,
@@ -196,7 +196,7 @@ async fn loop_halts_on_max_iterations_when_never_met() {
     run.guardrails.max_iterations = Some(3);
     let architect = NeverDoneArchitect;
     let forger = ScriptedForger;
-    let suite = || SuiteResult { passed: false };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: false } }) };
 
     let pool = TwoAgentPool {
         architect: &architect,
@@ -235,7 +235,7 @@ async fn loop_halts_on_cost_budget() {
     run.guardrails.cost.budget = Some(8.0); // forger costs 5/subtask → trips fast
     let architect = NeverDoneArchitect;
     let forger = ScriptedForger;
-    let suite = || SuiteResult { passed: false };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: false } }) };
 
     let pool = TwoAgentPool {
         architect: &architect,
@@ -317,7 +317,7 @@ async fn loop_drains_live_steer_into_next_plan_prompt() {
         plan_prompts: Mutex::new(Vec::new()),
     };
     let forger = ScriptedForger;
-    let suite = || SuiteResult { passed: true };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: true } }) };
 
     // The steer source yields one instruction on the first drain, then nothing.
     let pending = Mutex::new(vec![ConsoleInput {
@@ -374,7 +374,7 @@ async fn loop_halts_when_external_blocked_timeout_is_signalled() {
     );
     let architect = NeverDoneArchitect;
     let forger = ScriptedForger;
-    let suite = || SuiteResult { passed: false };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: false } }) };
     // The gate has timed out a transmission before the loop's first check.
     let blocked = std::sync::atomic::AtomicBool::new(true);
     let external_halt = || {

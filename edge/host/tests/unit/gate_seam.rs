@@ -32,7 +32,7 @@ async fn answer_permission_decision_is_identical_across_origins() {
         (remote(), "deny", Decision::Deny),
     ] {
         let reg = TransmissionRegistry::default();
-        let rx = reg.open("tx-1".into());
+        let rx = reg.open("tx-1");
         let outcome = route_control(
             &reg,
             &origin,

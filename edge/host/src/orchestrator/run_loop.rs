@@ -46,8 +46,9 @@ pub struct LoopDeps<'a> {
     /// The hired-agent roster: who can be assigned work, and who leads.
     pub pool: &'a dyn AgentPool,
     /// Runs the full project suite (cargo + vitest + playwright). Async so the
-    /// real impl can shell out; the fake returns instantly.
-    pub run_suite: &'a (dyn Fn() -> SuiteResult + Send + Sync),
+    /// real impl can offload the blocking shell-out to a blocking thread
+    /// (`spawn_blocking`) without starving the runtime; the fake returns instantly.
+    pub run_suite: &'a (dyn Fn() -> futures::future::BoxFuture<'static, SuiteResult> + Send + Sync),
     /// Where to persist run-state each iteration.
     pub runs_root: &'a Path,
     /// Sink for projected `WagnerEvent`s (drives the floor). No-op in tests.
@@ -191,9 +192,9 @@ pub async fn run_goal(mut run: Run, deps: LoopDeps<'_>) -> Run {
         let plan = match oracle::parse_plan(&plan_out.final_text, &roster_ids) {
             Ok(p) => p,
             Err(e) => {
-                // One re-prompt, then give up this iteration (escalation lands with US2).
                 // Log the parse failure so a stuck oracle leaves a diagnosis trail.
                 eprintln!("[wagner] run {} oracle plan parse failed, re-prompting: {e}", run.run_id);
+                // One re-prompt, then give up this iteration (escalation lands with US2).
                 let retry = lead.run(Role::Plan, &replan_prompt(&run)).await;
                 run.guardrails.cost.used += retry.cost;
                 emit_outcome(
@@ -222,7 +223,7 @@ pub async fn run_goal(mut run: Run, deps: LoopDeps<'_>) -> Run {
         if plan.goal_met_hypothesis {
             run.phase = RunPhase::Judging;
             (deps.progress)(&run);
-            let suite = (deps.run_suite)();
+            let suite = (deps.run_suite)().await;
             let judge_out = lead.run(Role::Judge, &judge_prompt(&run)).await;
             run.guardrails.cost.used += judge_out.cost;
             emit_outcome(

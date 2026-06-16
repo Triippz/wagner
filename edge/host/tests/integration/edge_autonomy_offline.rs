@@ -177,7 +177,7 @@ async fn run_completes_offline_with_zero_hub_calls() {
     let emit = |_ev| {
         emit_count.fetch_add(1, Ordering::SeqCst);
     };
-    let suite = || SuiteResult { passed: true };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: true } }) };
     let no_steer = Vec::<ConsoleInput>::new;
     let no_halt = || None::<HaltReason>;
 

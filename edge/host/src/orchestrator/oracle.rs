@@ -35,13 +35,13 @@ impl OraclePlan {
 pub enum PlanError {
     #[error("plan is not valid JSON: {0}")]
     NotJson(String),
-    #[error("plan failed schema validation: {0}")]
-    Schema(String),
     /// Schema-valid JSON that still failed to deserialize into `OraclePlan` — a
     /// shape/type mismatch the schema didn't catch, distinct from `NotJson` so
     /// error matchers don't conflate "not JSON" with "wrong shape".
     #[error("plan JSON did not deserialize into the expected shape: {0}")]
     Shape(String),
+    #[error("plan failed schema validation: {0}")]
+    Schema(String),
     #[error("plan dependency index {idx} is out of range (only {len} subtasks)")]
     BadDependency { idx: usize, len: usize },
     #[error("plan assigns a subtask to unknown agent `{0}` (not in the roster)")]
@@ -53,7 +53,7 @@ pub enum PlanError {
 /// `roster_ids` are the ids of the hired agents; every subtask must be assigned
 /// to one of them (a semantic check the schema can't express).
 pub fn parse_plan(raw: &str, roster_ids: &[String]) -> Result<OraclePlan, PlanError> {
-    let json_slice = extract_json_object(raw).ok_or_else(|| {
+    let json_slice = super::json_scan::first_balanced_object(raw).ok_or_else(|| {
         PlanError::NotJson("no top-level JSON object found in planner output".to_string())
     })?;
 
@@ -80,39 +80,6 @@ pub fn parse_plan(raw: &str, roster_ids: &[String]) -> Result<OraclePlan, PlanEr
         }
     }
     Ok(plan)
-}
-
-/// Extract the first balanced `{...}` object from text that may contain prose
-/// or ```json fences around it.
-fn extract_json_object(s: &str) -> Option<&str> {
-    let start = s.find('{')?;
-    let bytes = s.as_bytes();
-    let mut depth = 0usize;
-    let mut in_str = false;
-    let mut escaped = false;
-    for i in start..bytes.len() {
-        let c = bytes[i] as char;
-        if in_str {
-            match c {
-                '\\' if !escaped => escaped = true,
-                '"' if !escaped => in_str = false,
-                _ => escaped = false,
-            }
-            continue;
-        }
-        match c {
-            '"' => in_str = true,
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(&s[start..=i]);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 #[cfg(test)]

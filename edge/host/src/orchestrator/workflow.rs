@@ -137,6 +137,10 @@ pub struct Workflow {
 
 pub const WORKFLOW_SCHEMA: &str = "workflow.v1";
 
+/// Default per-edge cap for built-in fix-loops (review/test/gate retries): the
+/// most times such an `OnFail` edge may be traversed in one run.
+const FIX_LOOP_CAP: usize = 3;
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum WorkflowError {
     #[error("workflow must have at least one node")]
@@ -306,15 +310,15 @@ impl Workflow {
                 WorkflowEdge::new("aggregate", "scope", EdgeWhen::Always),
                 WorkflowEdge::new("scope", "gate", EdgeWhen::Always),
                 WorkflowEdge::new("gate", "plan", EdgeWhen::OnPass),
-                WorkflowEdge::capped("gate", "scope", EdgeWhen::OnFail, 3), // reject → rescope
+                WorkflowEdge::capped("gate", "scope", EdgeWhen::OnFail, FIX_LOOP_CAP), // reject → rescope
                 WorkflowEdge::new("plan", "interrogate", EdgeWhen::Always),
                 WorkflowEdge::new("interrogate", "tdd", EdgeWhen::Always),
                 WorkflowEdge::new("tdd", "execute", EdgeWhen::Always),
                 WorkflowEdge::new("execute", "review", EdgeWhen::Always),
                 WorkflowEdge::new("review", "test", EdgeWhen::OnPass),
-                WorkflowEdge::capped("review", "execute", EdgeWhen::OnFail, 3),
+                WorkflowEdge::capped("review", "execute", EdgeWhen::OnFail, FIX_LOOP_CAP),
                 WorkflowEdge::new("test", "done", EdgeWhen::OnPass),
-                WorkflowEdge::capped("test", "execute", EdgeWhen::OnFail, 3),
+                WorkflowEdge::capped("test", "execute", EdgeWhen::OnFail, FIX_LOOP_CAP),
             ],
         }
     }

@@ -34,7 +34,7 @@ pub fn check(guardrails: &Guardrails, cost_used: f64) -> Verdict {
 /// Evaluate the blocked-too-long guardrail for an open transmission.
 /// `blocked_secs` is how long the current transmission has been unanswered.
 pub fn check_blocked(guardrails: &Guardrails, blocked_secs: u64) -> Verdict {
-    if blocked_secs >= guardrails.blocked_timeout_secs as u64 {
+    if blocked_secs >= u64::from(guardrails.blocked_timeout_secs) {
         return Verdict::Halt(HaltReason::BlockedTimeout);
     }
     Verdict::Continue

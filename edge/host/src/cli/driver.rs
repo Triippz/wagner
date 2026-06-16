@@ -19,7 +19,7 @@ pub enum DriverError {
     #[error("child stdout/stdin was not captured")]
     NoPipe,
     #[error("io error: {0}")]
-    Io(String),
+    Io(#[from] std::io::Error),
 }
 
 /// A running CLI subprocess. Drop or `kill` to terminate.
@@ -92,37 +92,21 @@ impl Driver {
     /// a newline. Used to answer transmissions (US2).
     pub async fn write_line(&mut self, line: &str) -> Result<(), DriverError> {
         let stdin = self.stdin.as_mut().ok_or(DriverError::NoPipe)?;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| DriverError::Io(e.to_string()))?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| DriverError::Io(e.to_string()))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| DriverError::Io(e.to_string()))?;
+        stdin.write_all(line.as_bytes()).await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await?;
         Ok(())
     }
 
     /// Wait for the child to exit and return whether it succeeded.
     pub async fn wait(&mut self) -> Result<bool, DriverError> {
-        let status = self
-            .child
-            .wait()
-            .await
-            .map_err(|e| DriverError::Io(e.to_string()))?;
+        let status = self.child.wait().await?;
         Ok(status.success())
     }
 
     /// Forcibly terminate the child (abort path, FR-017).
     pub async fn kill(&mut self) -> Result<(), DriverError> {
-        self.child
-            .kill()
-            .await
-            .map_err(|e| DriverError::Io(e.to_string()))
+        Ok(self.child.kill().await?)
     }
 
     /// Drain all remaining signals after the child has finished emitting.

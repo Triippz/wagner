@@ -21,7 +21,7 @@ pub enum HaltReason {
     Cost,
     BlockedTimeout,
     /// The run was launched in an unusable state (e.g. no lead-capable agent in
-    /// the roster). Surfaced as a terminal halt instead of panicking the loop (M6).
+    /// the roster). Surfaced as a terminal halt instead of panicking the loop.
     Misconfigured,
 }
 

@@ -136,7 +136,7 @@ async fn eval_slugify_goal_reaches_met_with_both_factions_and_valid_state() {
         plan_calls: AtomicUsize::new(0),
     };
     let forger = EvalForger;
-    let suite = || SuiteResult { passed: true };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: true } }) };
     let events: Mutex<Vec<WagnerEvent>> = Mutex::new(Vec::new());
     let emit = |ev: WagnerEvent| events.lock().unwrap().push(ev);
 
@@ -169,12 +169,15 @@ async fn eval_slugify_goal_reaches_met_with_both_factions_and_valid_state() {
         2,
         "expected two dispatched subtasks"
     );
-    assert!(final_run
-        .subtasks
-        .iter()
-        .all(|s| s.state == SubtaskState::Done));
-    assert!(final_run.subtasks.iter().any(|s| s.agent_id == "vex"));
-    assert!(final_run.subtasks.iter().any(|s| s.agent_id == "cipher"));
+    // Each agent's OWN subtask reached Done — not merely "a subtask by this agent
+    // exists". Catches a regression where one faction's work silently fails while
+    // the other carries the run.
+    let agent_done = |agent: &str| {
+        let mut subs = final_run.subtasks.iter().filter(|s| s.agent_id == agent).peekable();
+        subs.peek().is_some() && subs.all(|s| s.state == SubtaskState::Done)
+    };
+    assert!(agent_done("vex"), "vex's subtask(s) must exist and be Done");
+    assert!(agent_done("cipher"), "cipher's subtask(s) must exist and be Done");
     // Each subtask carries its assignment rationale (FR-013 traceability).
     assert!(final_run
         .subtasks

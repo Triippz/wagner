@@ -107,6 +107,7 @@ mod tests {
     fn completed_projects_to_mirror() {
         let s = CliSignal::Completed {
             cost_usd: Some(0.1),
+            tokens: None,
             result: "done".into(),
         };
         let e = signal_to_event(&s, ctx()).unwrap();

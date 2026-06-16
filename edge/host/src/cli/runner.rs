@@ -168,7 +168,15 @@ impl EngineRunner for CliEngineRunner {
         let args = self.args(role, &self.full_prompt(prompt));
         match crate::cli::Driver::spawn(&self.program, &args, &self.cwd, self.mapper) {
             Ok(mut driver) => {
-                let success = driver.wait().await.unwrap_or(false);
+                // Distinguish a child IO/wait error from a clean exit-1; both yield
+                // `false`, but only the error gets a diagnosis trail.
+                let success = match driver.wait().await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[wagner] `{}` wait failed: {e}", self.program);
+                        false
+                    }
+                };
                 let signals = driver.collect_remaining().await;
                 EngineOutcome::from_signals(signals, success)
             }
@@ -324,9 +332,8 @@ mod tests {
     }
 
     /// SC-002 (env half) — the ONLY child env The Construct authors is the gate
-    /// MCP server's `CONSTRUCT_GATE_URL` + the per-run `CONSTRUCT_GATE_TOKEN` (M2).
-    /// It must never carry an API key, or a gated Claude run would silently route
-    /// to metered billing.
+    /// MCP server's loopback URL and its per-run auth token. It must never carry
+    /// an API key, or a gated Claude run would silently route to metered billing.
     #[test]
     fn gate_env_carries_only_url_and_token_no_api_key() {
         let json = gate_mcp_config("/tmp/gate.mjs", "http://127.0.0.1:5599/permission", "test-token");
@@ -337,8 +344,8 @@ mod tests {
         assert_eq!(keys, vec!["CONSTRUCT_GATE_TOKEN", "CONSTRUCT_GATE_URL"]);
         assert_eq!(env["CONSTRUCT_GATE_TOKEN"], "test-token");
         for k in env.keys() {
-            let lower = k.to_lowercase();
-            assert!(!lower.contains("api-key") && !lower.contains("api_key"));
+            let lk = k.to_lowercase();
+            assert!(!lk.contains("api-key") && !lk.contains("api_key"), "gate env leaked an API key: {k}");
         }
     }
 }

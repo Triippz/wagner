@@ -26,7 +26,7 @@ pub fn extract_panel(final_text: &str) -> Option<Value> {
         return None;
     }
     // Fall back to any balanced top-level object carrying "blocks".
-    scan_objects(final_text).into_iter().find_map(parse_panel)
+    super::json_scan::balanced_objects(final_text).into_iter().find_map(parse_panel)
 }
 
 /// The whitelisted primitive vocabulary (must match the frontend `uiSpec.ts`).
@@ -63,47 +63,6 @@ fn fenced_block<'a>(text: &'a str, lang: &str) -> Option<&'a str> {
     let body = &rest[body_start..];
     let end = body.find("```")?;
     Some(&body[..end])
-}
-
-/// Return every balanced `{…}` top-level object substring (cheap brace scan).
-fn scan_objects(text: &str) -> Vec<&str> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0usize;
-    let mut in_str = false;
-    let mut escaped = false;
-    for (i, &b) in bytes.iter().enumerate() {
-        if in_str {
-            if escaped {
-                escaped = false;
-            } else if b == b'\\' {
-                escaped = true;
-            } else if b == b'"' {
-                in_str = false;
-            }
-            continue;
-        }
-        match b {
-            b'"' => in_str = true,
-            b'{' => {
-                if depth == 0 {
-                    start = i;
-                }
-                depth += 1;
-            }
-            b'}' => {
-                if depth > 0 {
-                    depth -= 1;
-                    if depth == 0 {
-                        out.push(&text[start..=i]);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
 }
 
 #[cfg(test)]

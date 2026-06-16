@@ -90,7 +90,7 @@ async fn a_run_in_flight_completes_after_the_window_is_closed() {
     let lead = Lead { plan_calls: AtomicUsize::new(0) };
     let worker = Worker;
     let pool = Pool { lead: &lead, worker: &worker };
-    let suite = || SuiteResult { passed: true };
+    let suite = || -> futures::future::BoxFuture<'static, SuiteResult> { Box::pin(async { SuiteResult { passed: true } }) };
     let no_steer = Vec::<ConsoleInput>::new;
     let no_halt = || None::<HaltReason>;
 

@@ -46,12 +46,13 @@ pub fn map_codex_line(line: &str) -> CliSignal {
         },
         Some("item.completed") => map_item(&v),
         Some("turn.completed") => {
-            // Token usage stands in for cost; we expose it via the cost_usd slot as
-            // tokens-as-f64 only when no USD is available. Keep result text empty;
-            // the loop reads usage separately. Here we surface completion + usage.
-            let tokens = v.get("usage").and_then(usage_total_tokens);
+            // Codex reports token usage, not USD. Surface it in the distinct
+            // `tokens` slot — never in `cost_usd` — so a USD budget is never
+            // compared against a token count (M8). Result text is empty; the loop
+            // reads usage separately.
             CliSignal::Completed {
-                cost_usd: tokens.map(|t| t as f64),
+                cost_usd: None,
+                tokens: v.get("usage").and_then(usage_total_tokens),
                 result: String::new(),
             }
         }
@@ -70,7 +71,7 @@ fn map_item(v: &Value) -> CliSignal {
         .get("text")
         .and_then(Value::as_str)
         .or_else(|| item.get("command").and_then(Value::as_str))
-        .map(|s| s.trim().chars().take(80).collect::<String>());
+        .map(|s| super::truncate(s, super::MESSAGE_PREVIEW_MAX));
     CliSignal::Activity { activity, message }
 }
 
@@ -98,10 +99,12 @@ mod tests {
                 ..
             }
         ));
-        // turn.completed carries token usage (surfaced via cost slot for Forgers).
+        // turn.completed carries token usage in the distinct `tokens` slot — never
+        // in the USD `cost_usd` slot (M8).
         match &signals[3] {
-            CliSignal::Completed { cost_usd, .. } => {
-                assert_eq!(cost_usd.unwrap() as u64, 24263 + 52);
+            CliSignal::Completed { cost_usd, tokens, .. } => {
+                assert_eq!(*cost_usd, None, "Codex tokens must not be written into the USD slot");
+                assert_eq!(tokens.unwrap(), 24263 + 52);
             }
             other => panic!("expected Completed, got {:?}", other),
         }

@@ -55,7 +55,7 @@ pub async fn handle_permission(
     let subtask_id = id.clone();
 
     // Register the waiter BEFORE emitting, so an instant answer can't race us.
-    let rx = reg.open(id.clone());
+    let rx = reg.open(&id);
     emit(crate::transmissions::request_to_transmission_json(
         &req,
         &id,
