@@ -1,0 +1,678 @@
+//! Tauri command surface (T035) — what the frontend invokes, and the event
+//! channels it listens on (`wagner://event|run|transmission`).
+
+use wagner_edge_host::cli::CliStatus;
+use wagner_edge_host::orchestrator::roster::{Agent, Roster};
+use wagner_edge_host::orchestrator::run_loop::{run_goal, LoopDeps};
+use wagner_edge_host::orchestrator::{
+    builtin_templates, run_workflow, ExecConfig, GateDecision, NamedTemplate, StepRecord,
+    TestOutcome, Workflow,
+};
+use wagner_edge_host::memory::{MemoryInput, MemoryRecord, MemoryStore};
+use crate::pool::CliAgentPool;
+use wagner_edge_host::state::{ConsoleInput, Guardrails, Run};
+use wagner_edge_host::transmissions::TransmissionRegistry;
+use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+use wagner_edge_host::schema::WORKFLOW_STEP_EVENT_SCHEMA;
+
+/// Default node-execution ceiling for a composed workflow when the engineer sets
+/// no iteration cap (fix-loops are additionally bounded by their per-edge caps).
+const DEFAULT_MAX_WORKFLOW_STEPS: usize = 200;
+
+/// Per-run control handle held in Tauri-managed state.
+#[derive(Default)]
+pub struct RunManager {
+    current: Mutex<Option<RunControl>>,
+}
+
+struct RunControl {
+    task: tauri::async_runtime::JoinHandle<()>,
+    /// The loopback permission server task (US2 gate). Aborted with the run.
+    gate_server: tauri::async_runtime::JoinHandle<()>,
+    /// Live steering inputs the loop drains each iteration.
+    console: Arc<Mutex<Vec<ConsoleInput>>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GuardrailConfig {
+    /// `None` = no iteration cap (run until goal-met).
+    #[serde(default)]
+    pub max_iterations: Option<u32>,
+    pub blocked_timeout_secs: u32,
+    pub cost_budget: Option<f64>,
+    #[serde(default)]
+    pub suite_command: Option<String>,
+}
+
+/// Detect CLI availability + API-key env (EC-004, SC-002).
+#[tauri::command]
+pub fn preflight() -> CliStatus {
+    wagner_edge_host::cli::detect_system()
+}
+
+/// Ping a local-model endpoint (vLLM / Ollama / any OpenAI-compatible server):
+/// is it reachable, and what model(s) does it advertise? Used by the roster
+/// editor to confirm a local harness before a run. Never errors — an unreachable
+/// endpoint comes back `reachable: false` with the error string.
+#[tauri::command]
+pub async fn ping_endpoint(base_url: String) -> wagner_edge_host::cli::EndpointStatus {
+    wagner_edge_host::cli::ping_endpoint(&base_url).await
+}
+
+/// The catalog of operative identities the engineer can hire — parsed from the
+/// selected project's `.claude/agents/*.md` and `agents/*.md` (FR-007), with a
+/// built-in fallback. A blank dir resolves to the app's cwd. Never errors on a
+/// missing dir; it just returns the fallback catalog.
+#[tauri::command]
+pub fn agent_catalog(project_dir: String) -> Vec<wagner_edge_host::orchestrator::AgentIdentity> {
+    let dir = resolve_project_dir(
+        &project_dir,
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )
+    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    wagner_edge_host::orchestrator::scan_catalog(&dir)
+}
+
+/// The catalog of discoverable skills — parsed from the selected project's skill
+/// directories (`.claude/skills`, `skills`, `.agents/skills`), plus the user's
+/// global dirs (`~/.claude/skills`, `~/.codex/skills`), and installed plugins
+/// (`~/.claude/plugins/**/skills`). De-duped by id; repo wins. Never errors.
+#[tauri::command]
+pub fn skill_catalog(project_dir: String) -> Vec<wagner_edge_host::orchestrator::SkillRef> {
+    let dir = resolve_project_dir(
+        &project_dir,
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )
+    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    wagner_edge_host::orchestrator::scan_skills(&dir)
+}
+
+/// Does `project_dir` resolve to an existing directory? Lets the Composer block
+/// LAUNCH on a bad path up front instead of failing the run after launch. A blank
+/// path is `false` (a dir must be chosen). `~/` is expanded like the run path.
+#[tauri::command]
+pub fn validate_project_dir(project_dir: String) -> bool {
+    !project_dir.trim().is_empty()
+        && resolve_project_dir(&project_dir, std::path::PathBuf::from("/")).is_ok()
+}
+
+/// Start an autonomous run. Spawns the goal loop on a background task that emits
+/// `wagner://event` + `wagner://run` as it progresses. Returns the run id.
+// Tauri commands receive each request field as a parameter; grouping them into a
+// struct would only obscure the invoke contract the frontend depends on.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn start_run(
+    app: AppHandle,
+    mgr: State<'_, RunManager>,
+    reg: State<'_, Arc<TransmissionRegistry>>,
+    store: State<'_, MemoryStore>,
+    goal: String,
+    docs: Vec<String>,
+    guardrails: GuardrailConfig,
+    project_dir: String,
+    roster: Option<Vec<Agent>>,
+) -> Result<String, String> {
+    if goal.trim().is_empty() {
+        return Err("goal must not be empty".into());
+    }
+    // The hired-agent roster the run deploys. A blank/absent roster falls back to
+    // the default two-agent org (Cipher/Vex). Validated before the run starts.
+    let roster = match roster {
+        Some(agents) if !agents.is_empty() => Roster { agents },
+        _ => Roster::default_roster(),
+    };
+    roster.validate().map_err(|e| e.to_string())?;
+    // Resolve the project directory the operatives run in — this is what makes
+    // their per-project `claude`/`codex` settings (`.claude/`, AGENTS.md, MCP
+    // servers) apply. Falls back to the app's cwd when left blank.
+    let project_cwd = resolve_project_dir(
+        &project_dir,
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )?;
+    let run_id = ulid::Ulid::new().to_string();
+    // Normalized timestamp (always `…Z`, no sub-seconds) so `created_at` sorts
+    // lexicographically, matching save_memory/save_workflow_template.
+    let created_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    // Recall loop (read side): fold prior learnings for this project into the goal
+    // so the run's operatives see them — symmetric with `start_workflow`.
+    let goal = match store.recall_block(&project_dir, 8).await {
+        Some(block) => format!("{goal}\n\n{block}"),
+        None => goal,
+    };
+
+    let mut run = Run::new(run_id.clone(), goal, docs, created_at);
+    run.guardrails = Guardrails {
+        max_iterations: guardrails.max_iterations,
+        iterations_used: 0,
+        blocked_timeout_secs: guardrails.blocked_timeout_secs,
+        cost: wagner_edge_host::state::CostBudget {
+            mode: wagner_edge_host::state::CostMode::CliUsage,
+            budget: guardrails.cost_budget,
+            used: 0.0,
+        },
+    };
+
+    let console = Arc::new(Mutex::new(Vec::<ConsoleInput>::new()));
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let runs_root = app_data.join("runs");
+    let suite_command = guardrails.suite_command.clone();
+
+    // US2 permission gate: start the loopback server, write the MCP gate script,
+    // and hand Claude a `--permission-prompt-tool` that routes here.
+    // A blocked-too-long transmission flips this flag; the loop reads it each
+    // iteration and promotes the stall to a whole-run halt (T042/FR-016).
+    let blocked_halt = Arc::new(AtomicBool::new(false));
+    let gate = crate::gate::start_gate_server(
+        &app,
+        &app_data,
+        reg.inner().clone(),
+        u64::from(run.guardrails.blocked_timeout_secs),
+        blocked_halt.clone(),
+    )
+    .await?;
+
+    let app_for_loop = app.clone();
+    let console_for_loop = console.clone();
+    let suite_for_loop = suite_command.clone();
+    let gate_config = gate.config.clone();
+    let blocked_for_loop = blocked_halt.clone();
+    let cwd = project_cwd.clone();
+    let suite_cwd = project_cwd.clone();
+    let task = tauri::async_runtime::spawn(async move {
+        // Build one CLI runner per hired agent: Claude agents get the US2 gate
+        // and their skill prompt; Codex agents get theirs. The pool routes the
+        // loop's plan/judge to the lead and each subtask to its assigned agent.
+        let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
+        let app_for_emit = app_for_loop.clone();
+        let emit = move |ev: wagner_edge_host::events::WagnerEvent| {
+            let _ = app_for_emit.emit("wagner://event", ev);
+        };
+        // The suite shell-out is blocking and arbitrarily long; offload it to a
+        // blocking thread so it never starves the async runtime (M4).
+        let suite = move || -> futures::future::BoxFuture<'static, wagner_edge_host::orchestrator::judge::SuiteResult> {
+            let cmd = suite_for_loop.clone();
+            let cwd = suite_cwd.clone();
+            Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    crate::suite::run_suite(cmd.as_deref(), &cwd)
+                })
+                .await
+                .unwrap_or(wagner_edge_host::orchestrator::judge::SuiteResult { passed: false })
+            })
+        };
+        // Drain steering instructions submitted since the last iteration (US3).
+        let steer = move || std::mem::take(&mut *console_for_loop.lock().unwrap());
+        // Promote a gate blocked-timeout to a whole-run halt (T042).
+        let external_halt = move || {
+            blocked_for_loop
+                .load(Ordering::SeqCst)
+                .then_some(wagner_edge_host::state::HaltReason::BlockedTimeout)
+        };
+        // Live snapshot each phase/iteration → mission bar updates in real time.
+        let app_for_progress = app_for_loop.clone();
+        let progress = move |r: &wagner_edge_host::state::Run| {
+            let _ = app_for_progress.emit("wagner://run", r.clone());
+        };
+        // An agent-authored UI-spec panel → the inspector's "AGENT VIEW" (P5).
+        let app_for_panel = app_for_loop.clone();
+        let emit_panel = move |operative_id: &str, spec: serde_json::Value| {
+            let _ = app_for_panel.emit(
+                "wagner://panel",
+                serde_json::json!({ "operative_id": operative_id, "spec": spec }),
+            );
+        };
+
+        let final_run = run_goal(
+            run,
+            LoopDeps {
+                pool: &pool,
+                run_suite: &suite,
+                runs_root: &runs_root,
+                emit: &emit,
+                steer: &steer,
+                external_halt: &external_halt,
+                progress: &progress,
+                emit_panel: &emit_panel,
+            },
+        )
+        .await;
+        let _ = app_for_loop.emit("wagner://run", final_run);
+    });
+
+    *mgr.current.lock().unwrap() = Some(RunControl {
+        task,
+        gate_server: gate.server_task,
+        console,
+    });
+    Ok(run_id)
+}
+
+/// The workflow templates for the builder's picker (decision #4): the built-in
+/// starters plus any the engineer has saved. A saved template shadows a built-in of
+/// the same name (the engineer's version wins).
+#[tauri::command]
+pub async fn list_workflow_templates(
+    store: State<'_, MemoryStore>,
+) -> Result<Vec<NamedTemplate>, String> {
+    let roster = Roster::default_roster();
+    let lead = roster.lead().map(|a| a.id.clone()).unwrap_or_else(|| "cipher".into());
+    let forger = roster
+        .agents
+        .iter()
+        .find(|a| a.id != lead)
+        .map(|a| a.id.clone())
+        .unwrap_or_else(|| "vex".into());
+
+    let mut out = builtin_templates(&lead, &forger);
+    // Append saved templates; a saved name replaces the built-in of that name.
+    for t in store.list_templates().await.map_err(|e| e.to_string())? {
+        if let Ok(workflow) = serde_json::from_str::<Workflow>(&t.content) {
+            let named = NamedTemplate { name: t.name, description: t.description, workflow };
+            if let Some(slot) = out.iter_mut().find(|b| b.name == named.name) {
+                *slot = named;
+            } else {
+                out.push(named);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Save the current builder graph as a reusable named template (decision #4).
+#[tauri::command]
+pub async fn save_workflow_template(
+    store: State<'_, MemoryStore>,
+    name: String,
+    description: String,
+    workflow: Workflow,
+) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("template name must not be empty".into());
+    }
+    let content = serde_json::to_value(&workflow).map_err(|e| e.to_string())?;
+    // Normalized form (always `…Z`, no sub-seconds) so `ORDER BY created_at` sorts
+    // chronologically as a plain lexicographic string compare.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    store
+        .save_template(name.trim(), description.trim(), &content, Vec::new(), &now)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Persist a learning and project it to git-diffable Markdown under the project's
+/// `.wagner/memory/`. `project_dir` doubles as the multi-tenant `project_id`.
+#[tauri::command]
+pub async fn save_memory(
+    store: State<'_, MemoryStore>,
+    project_dir: String,
+    text: String,
+    tags: Vec<String>,
+    source_type: Option<String>,
+    source_ref: Option<String>,
+) -> Result<MemoryRecord, String> {
+    if text.trim().is_empty() {
+        return Err("memory text must not be empty".into());
+    }
+    // Normalized form (always `…Z`, no sub-seconds) so `ORDER BY created_at` sorts
+    // chronologically as a plain lexicographic string compare.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let rec = store
+        .save_memory(
+            MemoryInput {
+                project_id: project_dir.clone(),
+                text: text.trim().to_string(),
+                tags,
+                source_type,
+                source_ref,
+            },
+            &now,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    // Best-effort Markdown projection — never fail the save on an FS hiccup. The
+    // write itself lives on the store, not in this command handler.
+    if let Ok(dir) = resolve_project_dir(&project_dir, std::path::PathBuf::from(".")) {
+        store.write_markdown_projection(&dir, &rec);
+    }
+    Ok(rec)
+}
+
+/// Recall recent learnings for a project (newest first) — the recall loop's read side.
+#[tauri::command]
+pub async fn recall_memory(
+    store: State<'_, MemoryStore>,
+    project_dir: String,
+    tag: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<MemoryRecord>, String> {
+    store
+        .recall(&project_dir, tag.as_deref(), limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Validate an engineer-authored workflow graph (the same structural rules the
+/// builder enforces client-side). `Ok(())` means it is launchable.
+#[tauri::command]
+pub fn validate_workflow(workflow: Workflow) -> Result<(), String> {
+    workflow.validate().map_err(|e| e.to_string())
+}
+
+/// Launch a composed workflow (Phase E). Walks the engineer's graph over the hired
+/// roster on a background task, emitting `wagner://workflow` per stage and a final
+/// snapshot. Human `Gate` stages open a `wagner://transmission` and block on the
+/// engineer's answer (resolved via [`answer_transmission`]). Returns the run id.
+// Tauri commands receive each request field as a parameter (+ injected State); a
+// param struct would obscure the invoke contract the frontend depends on.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn start_workflow(
+    app: AppHandle,
+    mgr: State<'_, RunManager>,
+    reg: State<'_, Arc<TransmissionRegistry>>,
+    store: State<'_, MemoryStore>,
+    mut workflow: Workflow,
+    guardrails: GuardrailConfig,
+    project_dir: String,
+    roster: Option<Vec<Agent>>,
+) -> Result<String, String> {
+    workflow.validate().map_err(|e| e.to_string())?;
+    if workflow.root_goal.trim().is_empty() {
+        return Err("workflow root_goal must not be empty".into());
+    }
+    // Recall loop (read side): fold prior learnings for this project into the root
+    // goal so every stage's operative sees them — symmetric with `start_run`.
+    if let Some(block) = store.recall_block(&project_dir, 8).await {
+        workflow.root_goal = format!("{}\n\n{block}", workflow.root_goal);
+    }
+    let roster = match roster {
+        Some(agents) if !agents.is_empty() => Roster { agents },
+        _ => Roster::default_roster(),
+    };
+    roster.validate().map_err(|e| e.to_string())?;
+    let project_cwd = resolve_project_dir(
+        &project_dir,
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )?;
+
+    let run_id = ulid::Ulid::new().to_string();
+    let console = Arc::new(Mutex::new(Vec::<ConsoleInput>::new()));
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let suite_command = guardrails.suite_command.clone();
+    // Each node is one step; reuse the iteration cap as the step ceiling (fix-loops
+    // are additionally bounded by their per-edge caps). Generous default.
+    let max_steps = guardrails
+        .max_iterations
+        .map(|n| n as usize)
+        .unwrap_or(DEFAULT_MAX_WORKFLOW_STEPS);
+
+    // Claude operatives still need the US2 per-tool permission gate.
+    let blocked_halt = Arc::new(AtomicBool::new(false));
+    let gate = crate::gate::start_gate_server(
+        &app,
+        &app_data,
+        reg.inner().clone(),
+        u64::from(guardrails.blocked_timeout_secs),
+        blocked_halt.clone(),
+    )
+    .await?;
+
+    let app_for_loop = app.clone();
+    let gate_config = gate.config.clone();
+    let reg_for_gate = reg.inner().clone();
+    let cwd = project_cwd.clone();
+    let suite_cwd = project_cwd.clone();
+    let run_id_for_task = run_id.clone();
+
+    let task = tauri::async_runtime::spawn(async move {
+        let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
+
+        // Stage-level human gate: open a transmission, emit it, await the answer.
+        let app_for_gate = app_for_loop.clone();
+        let resolve_gate = move |node_id: &str, artifact: &str| -> futures::future::BoxFuture<'static, GateDecision> {
+            let reg = reg_for_gate.clone();
+            let app = app_for_gate.clone();
+            let node = node_id.to_string();
+            let art = artifact.to_string();
+            Box::pin(async move {
+                let id = ulid::Ulid::new().to_string();
+                let rx = reg.open(&id);
+                let _ = app.emit(
+                    "wagner://transmission",
+                    serde_json::json!({
+                        "schema": "transmission.v1",
+                        "id": id,
+                        "subtask_id": node,
+                        "kind": "gate",
+                        "prompt": format!("Approve stage '{node}'?"),
+                        "artifact": art,
+                        "options": [
+                            {"id": "allow", "label": "Approve"},
+                            {"id": "deny", "label": "Reject"}
+                        ],
+                        "raised_at": chrono::Utc::now().to_rfc3339(),
+                        "state": "open"
+                    }),
+                );
+                match rx.await {
+                    Ok(wagner_edge_host::transmissions::Decision::Allow) => GateDecision::Approve,
+                    _ => GateDecision::Reject {
+                        reason: format!("engineer rejected stage '{node}'"),
+                    },
+                }
+            })
+        };
+
+        // Deterministic Test harness — the configured suite command, shelled out.
+        // `run_test` is sync (the executor's port); offload the blocking shell-out
+        // onto a blocking thread so it doesn't stall the workflow executor (M4).
+        // This closure only ever runs on the app's multi-thread runtime.
+        let run_test = move |_harness: &str| {
+            let cmd = suite_command.clone();
+            let cwd = suite_cwd.clone();
+            let r = tokio::task::block_in_place(move || {
+                crate::suite::run_suite(cmd.as_deref(), &cwd)
+            });
+            TestOutcome {
+                passed: r.passed,
+                summary: if r.passed { "suite passed".into() } else { "suite failed".into() },
+            }
+        };
+
+        // Per-stage event → the builder highlights the active node + shows artifacts.
+        let app_for_step = app_for_loop.clone();
+        let run_id_for_step = run_id_for_task.clone();
+        let on_step = move |s: &StepRecord| {
+            let payload = serde_json::json!({
+                "run_id": run_id_for_step,
+                "node_id": s.node_id,
+                "kind": s.kind,
+                "operative_id": s.operative_id,
+                "success": s.success,
+                "passed": s.passed,
+                "fanout": s.fanout,
+                "final_text": s.final_text,
+            });
+            // Validate the Rust→TS contract for this channel before emitting, so a
+            // shape drift is caught here rather than silently in the frontend.
+            if let Err(e) = wagner_edge_host::schema::validate(
+                WORKFLOW_STEP_EVENT_SCHEMA,
+                &payload,
+            ) {
+                eprintln!("[wagner-edge] workflow-step event failed schema validation: {e}");
+            }
+            let _ = app_for_step.emit("wagner://workflow", payload);
+        };
+
+        let result = run_workflow(
+            &workflow,
+            &ExecConfig {
+                pool: &pool,
+                max_steps,
+                resolve_gate: &resolve_gate,
+                run_test: &run_test,
+                on_step: &on_step,
+            },
+        )
+        .await;
+
+        // Final snapshot: outcome + the full step log.
+        let _ = app_for_loop.emit(
+            "wagner://workflow-done",
+            serde_json::json!({
+                "run_id": run_id_for_task,
+                "end": format!("{:?}", result.as_ref().map(|r| &r.end)),
+                "cost": result.as_ref().map(|r| r.cost).unwrap_or(0.0),
+                "error": result.as_ref().err().map(|e| e.to_string()),
+                "steps": result.as_ref().ok().map(|r| {
+                    r.steps.iter().map(|s| serde_json::json!({
+                        "node_id": s.node_id, "kind": s.kind, "operative_id": s.operative_id,
+                        "success": s.success, "passed": s.passed, "fanout": s.fanout,
+                    })).collect::<Vec<_>>()
+                }),
+            }),
+        );
+    });
+
+    // Replace the active run — abort any prior one first so its loop + gate-server
+    // tasks (and the gate's loopback listener) don't leak on a back-to-back launch.
+    if let Some(prev) = mgr.current.lock().unwrap().replace(RunControl {
+        task,
+        gate_server: gate.server_task,
+        console,
+    }) {
+        prev.task.abort();
+        prev.gate_server.abort();
+    }
+    Ok(run_id)
+}
+
+/// Inject a steering instruction into the in-flight run (US3). Recorded now;
+/// the loop drains the queue each iteration.
+#[tauri::command]
+pub fn steer(mgr: State<'_, RunManager>, text: String) -> Result<(), String> {
+    let guard = mgr.current.lock().unwrap();
+    let ctl = guard.as_ref().ok_or("no active run")?;
+    ctl.console.lock().unwrap().push(ConsoleInput {
+        ts: chrono::Utc::now().to_rfc3339(),
+        text,
+    });
+    Ok(())
+}
+
+/// Answer an open transmission (US2): resolve the pending permission request so
+/// the waiting MCP permission tool returns allow/deny to Claude. Returns an error
+/// if the transmission id is unknown (already answered / timed out).
+#[tauri::command]
+pub fn answer_transmission(
+    reg: State<'_, Arc<TransmissionRegistry>>,
+    id: String,
+    response: String,
+) -> Result<(), String> {
+    let decision = wagner_edge_host::transmissions::Decision::from_answer(&response);
+    if reg.answer(&id, decision) {
+        Ok(())
+    } else {
+        Err(format!("no open transmission with id {id}"))
+    }
+}
+
+/// Abort the active run (FR-017): terminate the loop task; CLI children are
+/// killed on drop (`kill_on_drop`).
+#[tauri::command]
+pub fn abort(mgr: State<'_, RunManager>) -> Result<(), String> {
+    if let Some(ctl) = mgr.current.lock().unwrap().take() {
+        ctl.task.abort();
+        ctl.gate_server.abort();
+    }
+    Ok(())
+}
+
+/// Resolve the engineer-selected project directory into an existing directory
+/// the operatives run in. A blank selection falls back to `fallback` (the app's
+/// cwd). A leading `~` expands to `$HOME`. Errors if the path is not an existing
+/// directory — the run must not start against a path that doesn't exist.
+fn resolve_project_dir(
+    input: &str,
+    fallback: std::path::PathBuf,
+) -> Result<std::path::PathBuf, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(fallback);
+    }
+    let expanded = if let Some(rest) = trimmed.strip_prefix("~/") {
+        match std::env::var_os("HOME") {
+            Some(home) => std::path::PathBuf::from(home).join(rest),
+            None => std::path::PathBuf::from(trimmed),
+        }
+    } else {
+        std::path::PathBuf::from(trimmed)
+    };
+    if !expanded.is_dir() {
+        return Err(format!(
+            "project directory does not exist or is not a directory: {}",
+            expanded.display()
+        ));
+    }
+    // Canonicalize so the CLIs get a stable absolute cwd.
+    expanded
+        .canonicalize()
+        .map_err(|e| format!("could not resolve project directory: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_project_dir, validate_project_dir};
+    use std::path::PathBuf;
+
+    #[test]
+    fn validate_project_dir_gates_blank_and_missing() {
+        assert!(!validate_project_dir("   ".into()), "blank is not a valid dir");
+        assert!(
+            !validate_project_dir("/no/such/wagner/dir/xyz".into()),
+            "missing dir is invalid"
+        );
+        assert!(
+            validate_project_dir(std::env::temp_dir().to_string_lossy().into()),
+            "an existing dir is valid"
+        );
+    }
+
+    #[test]
+    fn blank_input_falls_back_verbatim() {
+        let fallback = std::env::temp_dir();
+        assert_eq!(
+            resolve_project_dir("   ", fallback.clone()).unwrap(),
+            fallback
+        );
+    }
+
+    #[test]
+    fn existing_dir_is_resolved() {
+        let dir = std::env::temp_dir();
+        let resolved = resolve_project_dir(&dir.to_string_lossy(), PathBuf::from(".")).unwrap();
+        assert!(resolved.is_dir());
+    }
+
+    #[test]
+    fn nonexistent_dir_errors() {
+        let err = resolve_project_dir("/no/such/wagner/dir/xyz", PathBuf::from("."))
+            .expect_err("a missing directory must error, not silently fall back");
+        assert!(err.contains("does not exist"));
+    }
+
+    #[test]
+    fn a_file_is_not_a_valid_project_dir() {
+        let file = std::env::temp_dir().join(format!("wagner-pd-{}", std::process::id()));
+        std::fs::write(&file, "x").unwrap();
+        assert!(resolve_project_dir(&file.to_string_lossy(), PathBuf::from(".")).is_err());
+        let _ = std::fs::remove_file(&file);
+    }
+}

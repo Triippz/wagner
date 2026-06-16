@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "workflow-step-event.v1",
+  "description": "One `wagner://workflow` step event emitted as a composed workflow advances. Schema-backed so the Rust→TS contract for this channel cannot drift silently.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "node_id",
+    "kind",
+    "operative_id",
+    "success",
+    "passed",
+    "fanout",
+    "final_text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "node_id": { "type": "string" },
+    "kind": { "type": "string" },
+    "operative_id": { "type": "string" },
+    "success": { "type": "boolean" },
+    "passed": { "type": ["boolean", "null"] },
+    "fanout": { "type": "integer", "minimum": 0 },
+    "final_text": { "type": "string" }
+  }
+}

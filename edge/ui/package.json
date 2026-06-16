@@ -3,11 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Edge Tauri frontend (ported store/bridge; consumes @wagner/shared). The wedge's interactive touches (mark-shareable, recall surfacing) land in a starter native Rust TUI; this TS surface is the carried GUI.",
+  "description": "Edge Tauri frontend — the live agent-run console. Folds the host event stream (@wagner/shared reducer) over the IPC/P2P transport abstraction and renders the run, the roster, and permission transmissions. Consumed by the wagner-edge-shell Tauri crate.",
   "dependencies": {
-    "@wagner/shared": "*"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@wagner/shared": "*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "vite": "^7.0.4"
   },
   "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json"
   }

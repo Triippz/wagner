@@ -8,11 +8,13 @@
 
 use serde_json::Value;
 
-/// The four schema sources, embedded at compile time.
+/// The five schema sources, embedded at compile time.
 pub const CONSTRUCT_EVENT_SCHEMA: &str = include_str!("../schemas/wagner-event.schema.json");
 pub const RUN_STATE_SCHEMA: &str = include_str!("../schemas/run-state.schema.json");
 pub const ORACLE_PLAN_SCHEMA: &str = include_str!("../schemas/oracle-plan.schema.json");
 pub const TRANSMISSION_SCHEMA: &str = include_str!("../schemas/transmission.schema.json");
+pub const WORKFLOW_STEP_EVENT_SCHEMA: &str =
+    include_str!("../schemas/workflow-step-event.schema.json");
 
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaError {
