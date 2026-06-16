@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WagnerEvent",
+  "description": "Normalized event emitted by the host to the frontend, derived from a CLI stream. Drives operative district, state, and speech bubble.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_id",
+    "run_id",
+    "operative_id",
+    "faction",
+    "activity",
+    "district",
+    "state",
+    "ts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "wagner-event.v1"
+    },
+    "event_id": {
+      "type": "string",
+      "description": "ULID"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "ULID of the owning run"
+    },
+    "operative_id": {
+      "type": "string"
+    },
+    "operative_name": {
+      "type": "string",
+      "description": "display name of the hired agent (floor label)"
+    },
+    "faction": {
+      "enum": [
+        "architects",
+        "forgers"
+      ]
+    },
+    "activity": {
+      "enum": [
+        "read",
+        "edit",
+        "test",
+        "build",
+        "lint",
+        "shell",
+        "review",
+        "diff",
+        "judge",
+        "plan",
+        "decompose",
+        "think",
+        "await_permission",
+        "await_question"
+      ]
+    },
+    "district": {
+      "enum": [
+        "stacks",
+        "forge",
+        "mirror",
+        "oracle",
+        "gate"
+      ]
+    },
+    "state": {
+      "enum": [
+        "idle",
+        "thinking",
+        "working",
+        "blocked"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "description": "Speech-bubble text (may be truncated by the UI)"
+    },
+    "handoff_target_operative_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

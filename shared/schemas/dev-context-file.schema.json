@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevContextFile",
+  "description": "File read/tree request — repo-scoped file or directory access for dev context.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "client_id",
+    "op",
+    "path",
+    "ts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dev-context-file.v1"
+    },
+    "client_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "op": {
+      "enum": [
+        "read",
+        "tree"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

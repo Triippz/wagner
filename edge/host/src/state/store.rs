@@ -1,0 +1,67 @@
+//! Run-state persistence: atomic JSON writes (D-RES-1) validated against
+//! `run-state.schema.json` before they touch disk (Article VII).
+
+use super::run::Run;
+use crate::schema::{self, RUN_STATE_SCHEMA};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("io error: {0}")]
+    Io(String),
+    #[error("serialization error: {0}")]
+    Serde(String),
+    #[error("schema validation failed: {0}")]
+    Schema(#[from] schema::SchemaError),
+}
+
+/// The outcome of a store operation (Article V — every op reports its effect).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    Created,
+    Updated,
+}
+
+/// Path to a run's state file under the runs root.
+pub fn run_state_path(runs_root: &Path, run_id: &str) -> PathBuf {
+    runs_root.join(run_id).join("state.json")
+}
+
+/// Persist a run atomically: validate → write to a temp file → fsync → rename.
+/// A partial write is never visible to readers (D-RES-1).
+pub fn save(runs_root: &Path, run: &Run) -> Result<WriteOutcome, StoreError> {
+    let json = schema::validate_serialized(RUN_STATE_SCHEMA, run)?;
+    let body = serde_json::to_vec_pretty(&json).map_err(|e| StoreError::Serde(e.to_string()))?;
+
+    let dest = run_state_path(runs_root, &run.run_id);
+    let existed = dest.exists();
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| StoreError::Io(e.to_string()))?;
+    }
+
+    let tmp = dest.with_extension("json.tmp");
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| StoreError::Io(e.to_string()))?;
+        f.write_all(&body)
+            .map_err(|e| StoreError::Io(e.to_string()))?;
+        f.sync_all().map_err(|e| StoreError::Io(e.to_string()))?;
+    }
+    std::fs::rename(&tmp, &dest).map_err(|e| StoreError::Io(e.to_string()))?;
+
+    Ok(if existed {
+        WriteOutcome::Updated
+    } else {
+        WriteOutcome::Created
+    })
+}
+
+/// Load a run, validating it against the schema on read.
+pub fn load(runs_root: &Path, run_id: &str) -> Result<Run, StoreError> {
+    let path = run_state_path(runs_root, run_id);
+    let body = std::fs::read_to_string(&path).map_err(|e| StoreError::Io(e.to_string()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| StoreError::Serde(e.to_string()))?;
+    schema::validate(RUN_STATE_SCHEMA, &value)?;
+    serde_json::from_value(value).map_err(|e| StoreError::Serde(e.to_string()))
+}

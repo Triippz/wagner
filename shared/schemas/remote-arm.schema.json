@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RemoteArm",
+  "description": "Edge arm action — operator arms a node for remote session access.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operator_id",
+    "node_id",
+    "ticket_id",
+    "ts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "remote-arm.v1"
+    },
+    "operator_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ticket_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

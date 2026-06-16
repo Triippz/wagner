@@ -6,11 +6,13 @@
   "description": "Wagner platform wedge — shared spine (schemas + reducer), edge UI, hub. Self-contained under platform/ (Article VII: nothing outside platform/ imports it).",
   "workspaces": [
     "shared",
-    "edge/ui"
+    "edge/ui",
+    "tests/architecture"
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "test:shared": "npm run test -w @wagner/shared",
+    "test:arch": "npm run test -w @wagner/arch-tests",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

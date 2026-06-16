@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Transmission",
+  "description": "A permission request or question from a paused CLI requiring an engineer response, routed back to the originating subtask.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "subtask_id",
+    "kind",
+    "prompt",
+    "options",
+    "raised_at",
+    "state"
+  ],
+  "properties": {
+    "schema": {
+      "const": "transmission.v1"
+    },
+    "id": {
+      "type": "string",
+      "description": "ULID"
+    },
+    "subtask_id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "permission",
+        "question"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "options": {
+      "type": "array",
+      "description": "Selectable responses. Empty for free-text questions.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "raised_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "answered_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "response": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "enum": [
+        "open",
+        "answered",
+        "timed_out"
+      ]
+    }
+  }
+}

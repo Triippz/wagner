@@ -1,0 +1,10 @@
+{
+  "name": "@wagner/arch-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Architecture guards (Article VII dependency-direction). Static, deterministic — no build, no network.",
+  "scripts": {
+    "test": "vitest run"
+  }
+}

@@ -11,6 +11,91 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ulid = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+jsonschema = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+portable-pty = { workspace = true }
+surrealdb = { workspace = true }
+# Remote transport (ADR-0003); wired at US2 T027. Declared at Setup (T001) to
+# verify it resolves + builds on the carried 1.90 toolchain.
+iroh = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+# wedge-002 integration/unit tests live under tests/{integration,unit}/ (the
+# spec's paths). Cargo does not auto-discover test subdirectories, so each is
+# declared explicitly as its own test target.
+[[test]]
+name = "edge_autonomy_offline"
+path = "tests/integration/edge_autonomy_offline.rs"
+
+[[test]]
+name = "gate_seam"
+path = "tests/unit/gate_seam.rs"
+
+[[test]]
+name = "tray_status"
+path = "tests/integration/tray_status.rs"
+
+[[test]]
+name = "tray_lifecycle"
+path = "tests/integration/tray_lifecycle.rs"
+
+[[test]]
+name = "run_survives_close"
+path = "tests/integration/run_survives_close.rs"
+
+[[test]]
+name = "reopen_fidelity"
+path = "tests/integration/reopen_fidelity.rs"
+
+[[test]]
+name = "arming"
+path = "tests/integration/arming.rs"
+
+[[test]]
+name = "attach_refused"
+path = "tests/integration/attach_refused.rs"
+
+[[test]]
+name = "ephemeral_session"
+path = "tests/integration/ephemeral_session.rs"
+
+[[test]]
+name = "attach"
+path = "tests/integration/attach.rs"
+
+[[test]]
+name = "no_hub_readable_runstate"
+path = "tests/integration/no_hub_readable_runstate.rs"
+
+[[test]]
+name = "devctx_filescope"
+path = "tests/unit/devctx_filescope.rs"
+
+[[test]]
+name = "devctx_command"
+path = "tests/integration/devctx_command.rs"
+
+[[test]]
+name = "no_pty"
+path = "tests/integration/no_pty.rs"
+
+[[test]]
+name = "remote_control"
+path = "tests/integration/remote_control.rs"
+
+[[test]]
+name = "concurrent_control"
+path = "tests/integration/concurrent_control.rs"
+
+[[test]]
+name = "devctx_privacy"
+path = "tests/integration/devctx_privacy.rs"
+
+[[test]]
+name = "attach_perf"
+path = "tests/integration/attach_perf.rs"

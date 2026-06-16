@@ -17,3 +17,18 @@ thiserror = "2"
 ulid = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tempfile = "3"
+# Engine-core deps (ported with the apps/wagner/src-tauri engine, T000a 2026-06-16).
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+jsonschema = "0.18"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+portable-pty = "0.8"
+# Embedded memory/learnings store — pure-Rust SurrealKV backend, pinned to 2.x
+# (3.1's diskann/fastnum deps need a newer rustc than the carried 1.90 toolchain).
+surrealdb = { version = "2", default-features = false, features = ["kv-surrealkv"] }
+# Remote transport (ADR-0003): QUIC P2P, Ed25519 node identity, NAT traversal,
+# org-run relay client. Added at Setup (T001) to de-risk the load-bearing dep
+# early; first used at US2 (T027). Tauri tray/notification deps land with the
+# shell at US1 (T019), per the workspace convention above.
+iroh = "1"

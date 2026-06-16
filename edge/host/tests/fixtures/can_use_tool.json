@@ -1,0 +1,9 @@
+{
+  "_comment": "LIVE capture (2026-06-13) of the arguments object Claude Code (v2.1.177) passes to a --permission-prompt-tool MCP tool. Captured via a zero-dep stdio MCP gate server in a throwaway dir, WebFetch (non-allowlisted) under --permission-mode default. Ground truth for transmissions.rs::parse_permission_request. Note: the live envelope key is `input` (NOT `tool_input` as the SDK docs imply), and a `tool_use_id` is present for correlation.",
+  "tool": "approve",
+  "arguments": {
+    "tool_name": "WebFetch",
+    "input": { "url": "https://example.com", "prompt": "What is the page title?" },
+    "tool_use_id": "toolu_01LTcZSyofe22ZcebZdzpwUm"
+  }
+}

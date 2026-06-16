@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevContextCmd",
+  "description": "Non-interactive command request — client requests execution of a shell command for dev context.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "client_id",
+    "argv",
+    "cwd",
+    "ts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dev-context-cmd.v1"
+    },
+    "client_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "argv": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

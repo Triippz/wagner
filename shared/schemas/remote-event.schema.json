@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RemoteEvent",
+  "description": "Event appended to the run log for remote session lifecycle actions. Records that an action happened with metadata only — never run-bearing content (F-1 privacy boundary).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_id",
+    "run_id",
+    "kind",
+    "ts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "remote-event.v1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": [
+        "remote.armed",
+        "remote.disarmed",
+        "remote.attached",
+        "remote.detached",
+        "remote.control",
+        "dev_context.command",
+        "dev_context.file_read",
+        "dev_context.tree",
+        "dev_context.refused"
+      ]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

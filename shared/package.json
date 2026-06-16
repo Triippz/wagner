@@ -6,13 +6,20 @@
   "description": "Carried spine: canonical JSON Schemas + pure reducers (UI projection + event-sourced run spine). No I/O, no UI dependency.",
   "exports": {
     "./reducer": "./reducer/index.ts",
+    "./reducer/remote-reducer": "./reducer/remote-reducer.ts",
+    "./reducer/remote-events": "./reducer/remote-events.ts",
     "./run-reducer": "./reducer/run-reducer.ts",
     "./run-events": "./reducer/run-events.ts",
+    "./transport": "./transport/index.ts",
     "./schemas/*": "./schemas/*"
   },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "ajv": "^8.17.1"
   }
 }

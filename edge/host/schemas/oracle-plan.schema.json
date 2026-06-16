@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OraclePlan",
+  "description": "Structured output the Claude Oracle planner MUST return each goal-loop iteration. Validated before the host acts; a non-conforming plan triggers one re-prompt then a Gate transmission.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "subtasks",
+    "goal_met_hypothesis"
+  ],
+  "properties": {
+    "schema": {
+      "const": "oracle-plan.v2"
+    },
+    "subtasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "description",
+          "agent",
+          "assignment_rationale",
+          "may_write_paths",
+          "depends_on"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "agent": {
+            "type": "string",
+            "minLength": 1,
+            "description": "id of the roster agent this subtask is assigned to"
+          },
+          "assignment_rationale": {
+            "type": "string"
+          },
+          "may_write_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "goal_met_hypothesis": {
+      "type": "boolean"
+    }
+  }
+}

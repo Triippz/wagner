@@ -1,0 +1,7 @@
+# Pin the platform edge workspace to Rust 1.91 (T001, 2026-06-16).
+# Reason: iroh 1.0 (ADR-0003 remote transport) requires rustc >= 1.91; the
+# carried engine compiled on 1.90 but 1.91 is a backward-compatible minor bump.
+# Scoped to platform/ — does not change the machine-global default toolchain.
+[toolchain]
+channel = "1.91.1"
+components = ["rustfmt", "clippy"]

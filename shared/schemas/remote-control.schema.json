@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RemoteControl",
+  "description": "Run-control message from a remote client — steer, answer a permission prompt, or invoke a skill.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "client_id",
+    "kind",
+    "ref",
+    "seq",
+    "ts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "remote-control.v1"
+    },
+    "client_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": [
+        "steer",
+        "answer_permission",
+        "run_skill"
+      ]
+    },
+    "ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic client sequence number for dedup."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
