@@ -59,8 +59,15 @@ try {
 
   await page.goto(BASE, { waitUntil: "networkidle" });
 
-  // 1) Composer (no run yet).
-  await page.waitForSelector("text=Launch a run", { timeout: 8000 });
+  // 1) New-session screen (no run yet): folder picker + goal, NO guardrails grid
+  //    and NO test-command field (acceptance U5).
+  await page.waitForSelector("text=New session", { timeout: 8000 });
+  await page.waitForSelector("text=Choose folder", { timeout: 8000 });
+  for (const gone of ["Max iterations", "Cost budget", "Test command", "Blocked timeout"]) {
+    if ((await page.locator(`text=${gone}`).count()) > 0) {
+      throw new Error(`new-session screen still shows dropped field: ${gone}`);
+    }
+  }
   await page.screenshot({ path: join(OUT, "1-composer.png") });
 
   // 2) A running run + two operatives + subtasks -> console view.

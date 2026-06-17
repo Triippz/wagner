@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { cmd, type CliStatus } from "../bridge";
 
 interface Props {
   onLaunched: () => void;
 }
 
+// New-session entry screen: pick a folder (native dialog) + name the first goal.
+// Guardrails (max-iterations / cost / blocked-timeout) and the test command are
+// gone — the target repo's own CLAUDE.md / AGENTS.md declares how it tests, and
+// the host applies guardrail defaults when omitted.
 export function Composer({ onLaunched }: Props) {
   const [goal, setGoal] = useState("");
   const [projectDir, setProjectDir] = useState("");
-  const [maxIter, setMaxIter] = useState("");
-  const [costBudget, setCostBudget] = useState("");
-  const [blockedTimeout, setBlockedTimeout] = useState("120");
-  const [suite, setSuite] = useState("");
   const [preflight, setPreflight] = useState<CliStatus | null>(null);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,27 +21,32 @@ export function Composer({ onLaunched }: Props) {
     cmd.preflight().then(setPreflight).catch(() => setPreflight(null));
   }, []);
 
-  const canLaunch = goal.trim().length > 0 && !launching;
+  const canLaunch =
+    goal.trim().length > 0 && projectDir.trim().length > 0 && !launching;
+
+  async function chooseFolder() {
+    setError(null);
+    try {
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        title: "Choose a project folder",
+      });
+      if (typeof picked === "string") setProjectDir(picked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function launch() {
     setError(null);
     setLaunching(true);
     try {
-      if (projectDir.trim()) {
-        const ok = await cmd.validateProjectDir(projectDir.trim());
-        if (!ok) throw new Error(`project directory does not exist: ${projectDir.trim()}`);
-      }
-      await cmd.startRun({
-        goal: goal.trim(),
-        projectDir: projectDir.trim(),
-        docs: [],
-        guardrails: {
-          max_iterations: maxIter.trim() ? Number(maxIter) : null,
-          blocked_timeout_secs: Number(blockedTimeout) || 120,
-          cost_budget: costBudget.trim() ? Number(costBudget) : null,
-          suite_command: suite.trim() || null,
-        },
-      });
+      const ok = await cmd.validateProjectDir(projectDir.trim());
+      if (!ok)
+        throw new Error(`project directory does not exist: ${projectDir.trim()}`);
+      // No guardrails: the host applies R-GUARDRAILS defaults.
+      await cmd.startRun({ goal: goal.trim(), projectDir: projectDir.trim(), docs: [] });
       onLaunched();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -52,15 +58,16 @@ export function Composer({ onLaunched }: Props) {
     <div className="center">
       <div className="composer">
         <div>
-          <h1>Launch a run</h1>
+          <h1>New session</h1>
           <p className="lede">
-            Give the org a goal and a working directory. The oracle plans, the
-            roster executes, and the run keeps going after you close the window.
+            Pick a project folder and name the first goal. The oracle plans, the
+            roster executes, and the session keeps going after you close the
+            window.
           </p>
         </div>
 
         <div className="field">
-          <label htmlFor="goal">Goal</label>
+          <label htmlFor="goal">First goal</label>
           <textarea
             id="goal"
             className="textarea"
@@ -72,42 +79,24 @@ export function Composer({ onLaunched }: Props) {
         </div>
 
         <div className="field">
-          <label htmlFor="dir">Project directory</label>
-          <input
-            id="dir"
-            className="input"
-            placeholder="~/code/my-project   (blank = this app's working dir)"
-            value={projectDir}
-            onChange={(e) => setProjectDir(e.target.value)}
-            spellCheck={false}
-          />
-          <span className="hint">Where the agents run — their per-project .claude / AGENTS.md / MCP config applies here.</span>
-        </div>
-
-        <div className="row">
-          <div className="field">
-            <label htmlFor="iter">Max iterations</label>
-            <input id="iter" className="input" inputMode="numeric" placeholder="uncapped"
-              value={maxIter} onChange={(e) => setMaxIter(e.target.value)} />
+          <label>Project folder</label>
+          <div className="row">
+            <button
+              className="btn"
+              data-variant="ghost"
+              type="button"
+              onClick={chooseFolder}
+            >
+              Choose folder…
+            </button>
+            <span className="path" title={projectDir}>
+              {projectDir || "No folder chosen"}
+            </span>
           </div>
-          <div className="field">
-            <label htmlFor="cost">Cost budget (USD)</label>
-            <input id="cost" className="input" inputMode="decimal" placeholder="none"
-              value={costBudget} onChange={(e) => setCostBudget(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="row">
-          <div className="field">
-            <label htmlFor="bt">Blocked timeout (s)</label>
-            <input id="bt" className="input" inputMode="numeric"
-              value={blockedTimeout} onChange={(e) => setBlockedTimeout(e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="suite">Test command</label>
-            <input id="suite" className="input" placeholder="e.g. cargo test" spellCheck={false}
-              value={suite} onChange={(e) => setSuite(e.target.value)} />
-          </div>
+          <span className="hint">
+            Where the agents run — its .claude / AGENTS.md / MCP config and test
+            setup apply here.
+          </span>
         </div>
 
         {error && <p className="err-line">{error}</p>}
@@ -116,15 +105,24 @@ export function Composer({ onLaunched }: Props) {
           <div className="preflight">
             {preflight ? (
               <>
-                <span className={preflight.claude ? "ok" : "no"}>claude {preflight.claude ? "✓" : "—"}</span>
-                <span className={preflight.codex ? "ok" : "no"}>codex {preflight.codex ? "✓" : "—"}</span>
+                <span className={preflight.claude ? "ok" : "no"}>
+                  claude {preflight.claude ? "✓" : "—"}
+                </span>
+                <span className={preflight.codex ? "ok" : "no"}>
+                  codex {preflight.codex ? "✓" : "—"}
+                </span>
               </>
             ) : (
               <span className="no">checking engines…</span>
             )}
           </div>
-          <button className="btn" data-variant="primary" disabled={!canLaunch} onClick={launch}>
-            {launching ? "Launching…" : "Launch run"}
+          <button
+            className="btn"
+            data-variant="primary"
+            disabled={!canLaunch}
+            onClick={launch}
+          >
+            {launching ? "Launching…" : "Start session"}
           </button>
         </div>
       </div>
