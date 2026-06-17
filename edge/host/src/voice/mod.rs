@@ -40,6 +40,7 @@
 
 pub mod http_stt;
 pub mod http_tts;
+pub mod manager;
 pub mod pipeline;
 pub mod router;
 pub mod stt;
@@ -54,3 +55,6 @@ pub use http_tts::HttpTts;
 // Re-export the domain types and router items at this level for test convenience.
 pub use router::{EngineHandles, RouteRequest, VoiceRouter};
 pub use types::{AudioChunk, SpeechChunk, Transcript, VoiceError};
+
+// VoiceManager and VoiceStatus re-exported at voice:: level for the shell layer.
+pub use manager::{VoiceManager, VoiceStatus};

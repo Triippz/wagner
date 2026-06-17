@@ -10,6 +10,7 @@ use wagner_edge_host::orchestrator::{
 };
 use wagner_edge_host::memory::{MemoryInput, MemoryRecord, MemoryStore};
 use crate::pool::CliAgentPool;
+use crate::voice_lifecycle::SidecarState;
 use wagner_edge_host::state::{ConsoleInput, Guardrails, Run};
 use wagner_edge_host::transmissions::TransmissionRegistry;
 use serde::Deserialize;
@@ -945,6 +946,83 @@ pub fn get_run(app: AppHandle, run_id: String) -> Result<Run, String> {
         .join("runs");
     wagner_edge_host::state::load(&runs_root, &run_id).map_err(|e| e.to_string())
 }
+
+// ── Voice IPC ───────────────────────────────────────────────────────────────
+
+/// Wire shape the UI lane depends on: `{ enabled, ready }`.
+/// Mirrors `VoiceStatus` from the host but lives here so the shell can add
+/// serde attributes without touching the Tauri-free host.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoiceStatusDto {
+    pub enabled: bool,
+    pub ready: bool,
+}
+
+impl From<wagner_edge_host::voice::VoiceStatus> for VoiceStatusDto {
+    fn from(s: wagner_edge_host::voice::VoiceStatus) -> Self {
+        Self {
+            enabled: s.enabled,
+            ready: s.ready,
+        }
+    }
+}
+
+/// Return the current voice-feature state.
+///
+/// IPC contract: `voice_status() -> { enabled: bool, ready: bool }`
+#[tauri::command]
+pub fn voice_status(
+    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+) -> VoiceStatusDto {
+    vm.status().into()
+}
+
+/// Enable or disable the voice feature.
+///
+/// IPC contract: `voice_set_enabled(on: bool) -> { enabled: bool, ready: bool }`
+///
+/// When `on = true` the shell spawns the STT and TTS sidecars, waits for each
+/// `/health` endpoint, and marks the manager `ready`. When `on = false` the
+/// sidecars are killed and `ready` is cleared.
+///
+/// Idempotent: enabling when already up returns the current status without
+/// re-spawning. Spawn / health-wait failure returns a typed `Err(String)` and
+/// leaves `enabled = false` (Article III).
+#[tauri::command]
+pub async fn voice_set_enabled(
+    on: bool,
+    app: AppHandle,
+    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+    sc: State<'_, SidecarState>,
+) -> Result<VoiceStatusDto, String> {
+    if on {
+        // Idempotent: already running.
+        if vm.status().enabled && vm.status().ready {
+            return Ok(vm.status().into());
+        }
+        // Mark enabled now so the UI reflects "starting" even before ready.
+        vm.set_enabled(true);
+
+        // Spawn sidecars and wait for health.
+        match crate::voice_lifecycle::spawn_sidecars(&app, &sc).await {
+            Ok(()) => {
+                vm.set_ready(true);
+            }
+            Err(e) => {
+                // Hard-fail: revert enabled, surface the error.
+                vm.set_enabled(false);
+                return Err(e);
+            }
+        }
+    } else {
+        // Kill sidecars; VoiceManager::set_enabled(false) also clears ready.
+        crate::voice_lifecycle::kill_sidecars(&sc).await;
+        vm.set_enabled(false);
+    }
+    Ok(vm.status().into())
+}
+
+// ── Resolve project directory ────────────────────────────────────────────────
 
 /// Resolve the engineer-selected project directory into an existing directory
 /// the operatives run in. A blank selection falls back to `fallback` (the app's

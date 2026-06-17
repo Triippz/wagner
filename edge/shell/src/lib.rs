@@ -8,6 +8,7 @@ pub mod commands;
 pub mod gate;
 pub mod pool;
 pub mod suite;
+pub mod voice_lifecycle;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -18,10 +19,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(commands::RunManager::default())
         .manage(Arc::new(
             wagner_edge_host::transmissions::TransmissionRegistry::default(),
         ))
+        .manage(wagner_edge_host::voice::VoiceManager::new())
+        .manage(voice_lifecycle::SidecarState::new())
         .setup(|app| {
             // Open (or create) the persistent memory store under the app-data dir.
             // Done synchronously (block_on) so the store is managed BEFORE any
@@ -81,6 +85,8 @@ pub fn run() {
             commands::approve_staging,
             commands::list_staging,
             commands::vault_graph,
+            commands::voice_status,
+            commands::voice_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running wagner-edge-shell");
