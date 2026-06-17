@@ -79,4 +79,26 @@ mod tests {
         let samples = vec![2.0f32, -3.0f32, 100.0f32];
         assert!(encode_wav(&samples).is_ok());
     }
+
+    #[test]
+    fn clamping_produces_correct_i16_values() {
+        // 2.0 → clamped to 1.0 → i16::MAX; -3.0 → clamped to -1.0 → -i16::MAX
+        let samples = vec![2.0f32, -3.0f32];
+        let wav = encode_wav(&samples).unwrap();
+
+        // Standard WAV layout: 44-byte header, then 16-bit samples LE.
+        // data chunk starts at offset 44.
+        assert!(wav.len() >= 44 + 4, "expected at least 48 bytes");
+
+        let s0 = i16::from_le_bytes([wav[44], wav[45]]);
+        let s1 = i16::from_le_bytes([wav[46], wav[47]]);
+
+        assert_eq!(s0, i16::MAX, "2.0 should clamp to i16::MAX ({})", i16::MAX);
+        assert_eq!(
+            s1,
+            -i16::MAX,
+            "-3.0 should clamp to -i16::MAX ({})",
+            -i16::MAX
+        );
+    }
 }

@@ -54,23 +54,56 @@ STT_LOG_FILE="${PID_DIR}/stt.log"
 TTS_LOG_FILE="${PID_DIR}/tts.log"
 
 # ---------------------------------------------------------------------------
+# SHA-256 constants (computed from known-good cached files)
+# ---------------------------------------------------------------------------
+
+SHA256_STT_MODEL="921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
+SHA256_TTS_MODEL="fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478"
+SHA256_TTS_VOICES="bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 log() { echo "[voice-sidecars] $*" >&2; }
 
-# Download a file if it does not exist (or is 0 bytes). Idempotent, resumable.
+# Verify SHA-256 of a file; delete and exit 1 on mismatch.
+verify_sha256() {
+    local file="$1" expected="$2" label="$3"
+    log "verifying SHA-256 of ${label}…"
+    local actual
+    actual="$(shasum -a 256 "${file}" | awk '{print $1}')"
+    if [[ "${actual}" != "${expected}" ]]; then
+        log "ERROR: SHA-256 mismatch for ${label}"
+        log "  expected: ${expected}"
+        log "  actual:   ${actual}"
+        rm -f "${file}"
+        exit 1
+    fi
+    log "${label} SHA-256 OK"
+}
+
+# Download a file if it does not exist (or is 0 bytes). Atomic: downloads to
+# a .tmp file and moves into place only on success; a RETURN trap ensures
+# partial/interrupted downloads never leave a stale file.
 download_if_missing() {
-    local url="$1" dest="$2" label="$3"
+    local url="$1" dest="$2" label="$3" expected_sha="$4"
     if [[ -f "${dest}" && -s "${dest}" ]]; then
         log "${label} already cached at ${dest}"
         return 0
     fi
     log "downloading ${label} → ${dest}"
     mkdir -p "$(dirname "${dest}")"
+    local tmp="${dest}.tmp"
+    # Remove any leftover .tmp from a previous interrupted download.
+    rm -f "${tmp}"
+    # Trap ensures the .tmp is cleaned up if this function exits for any reason.
+    trap 'rm -f "${tmp}"' RETURN
     # -f: fail on server error, -L: follow redirects, -C -: resume if partial
-    curl -fL -C - --progress-bar -o "${dest}" "${url}"
+    curl -fL -C - --progress-bar -o "${tmp}" "${url}"
+    mv "${tmp}" "${dest}"
     log "${label} download complete ($(du -h "${dest}" | cut -f1))"
+    verify_sha256 "${dest}" "${expected_sha}" "${label}"
 }
 
 # Return 0 if a process with the given PID is running.
@@ -115,7 +148,9 @@ wait_port() {
     return 1
 }
 
-# Wait for whisper-server's /health endpoint to return a valid HTTP response.
+# Wait for whisper-server's /health endpoint to return HTTP 200.
+# whisper-server returns non-200 while the model is loading, so we keep
+# polling until we see exactly 200.
 wait_http_health() {
     local label="$1" port="$2" pidfile="$3" tries=60
     log "waiting for ${label} /health on :${port} (up to ${tries}s)…"
@@ -123,8 +158,8 @@ wait_http_health() {
         local code
         code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 \
             "http://127.0.0.1:${port}/health" 2>/dev/null)" || true
-        if [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]]; then
-            log "${label} ready (HTTP ${code} on /health)"
+        if [[ "${code}" == "200" ]]; then
+            log "${label} ready (HTTP 200 on /health)"
             return 0
         fi
         local pid
@@ -158,6 +193,16 @@ kill_pid_file() {
 # ---------------------------------------------------------------------------
 
 start() {
+    # 0. Already-running guard: if both sidecars are live, do nothing.
+    local existing_stt existing_tts
+    existing_stt="$(read_pid "${STT_PID_FILE}")" || true
+    existing_tts="$(read_pid "${TTS_PID_FILE}")" || true
+    if [[ -n "${existing_stt}" && -n "${existing_tts}" ]]; then
+        log "sidecars already running (stt pid=${existing_stt}, tts pid=${existing_tts})"
+        log "to restart: $0 stop && $0 start"
+        return 0
+    fi
+
     # 1. Ensure whisper-server is on PATH.
     if ! command -v whisper-server >/dev/null 2>&1; then
         log "ERROR: whisper-server not found."
@@ -175,10 +220,10 @@ start() {
         log "TTS sidecar binary: ${TTS_BIN}"
     fi
 
-    # 3. Download models if missing (idempotent, resumable).
-    download_if_missing "${STT_MODEL_URL}" "${STT_MODEL_FILE}" "ggml-tiny.en.bin (STT)"
-    download_if_missing "${TTS_MODEL_URL}"    "${TTS_MODEL_FILE}"  "model_quantized.onnx (TTS)"
-    download_if_missing "${TTS_VOICES_URL}"   "${TTS_VOICES_FILE}" "voices-v1.0.bin (TTS)"
+    # 3. Download models if missing (idempotent, resumable, SHA-256 verified).
+    download_if_missing "${STT_MODEL_URL}" "${STT_MODEL_FILE}" "ggml-tiny.en.bin (STT)"     "${SHA256_STT_MODEL}"
+    download_if_missing "${TTS_MODEL_URL}"    "${TTS_MODEL_FILE}"  "model_quantized.onnx (TTS)" "${SHA256_TTS_MODEL}"
+    download_if_missing "${TTS_VOICES_URL}"   "${TTS_VOICES_FILE}" "voices-v1.0.bin (TTS)"      "${SHA256_TTS_VOICES}"
 
     # 4. Create run dir for PID/log files.
     mkdir -p "${PID_DIR}"
@@ -196,8 +241,9 @@ start() {
         --model "${STT_MODEL_FILE}" \
         --threads 4 \
         >"${STT_LOG_FILE}" 2>&1 &
-    echo "$!" >"${STT_PID_FILE}"
-    log "whisper-server pid $!"
+    local stt_pid=$!
+    echo "${stt_pid}" >"${STT_PID_FILE}"
+    log "whisper-server pid ${stt_pid}"
 
     # 7. Spawn wagner-tts-sidecar (TTS) in the background.
     log "spawning wagner-tts-sidecar → :${TTS_PORT}"
@@ -206,8 +252,9 @@ start() {
         --model "${TTS_MODEL_FILE}" \
         --voices "${TTS_VOICES_FILE}" \
         >"${TTS_LOG_FILE}" 2>&1 &
-    echo "$!" >"${TTS_PID_FILE}"
-    log "wagner-tts-sidecar pid $!"
+    local tts_pid=$!
+    echo "${tts_pid}" >"${TTS_PID_FILE}"
+    log "wagner-tts-sidecar pid ${tts_pid}"
 
     # 8. Wait for readiness.
     wait_http_health "whisper-server" "${STT_PORT}" "${STT_PID_FILE}"

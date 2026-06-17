@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use misaki_rs::{Language, G2P};
+use misaki_rs::G2P;
 use ndarray::{Array1, Array2};
 use ort::{session::Session, value::Tensor};
 
@@ -29,8 +29,14 @@ pub fn load_session(model_path: &str) -> Result<Session, String> {
 }
 
 /// Convert `text` → phoneme token IDs using misaki-rs (English US, no espeak).
-pub fn text_to_token_ids(text: &str, vocab: &HashMap<char, i64>) -> Result<Vec<i64>, String> {
-    let g2p = G2P::new(Language::EnglishUS);
+///
+/// `g2p` is passed by reference so the caller can construct it once and reuse
+/// it across requests (G2P construction loads data and is expensive).
+pub fn text_to_token_ids(
+    text: &str,
+    vocab: &HashMap<char, i64>,
+    g2p: &G2P,
+) -> Result<Vec<i64>, String> {
     let (phonemes, _tokens) = g2p.g2p(text).map_err(|e| format!("G2P error: {e:?}"))?;
 
     let ids = phonemes_to_ids(&phonemes, vocab)?;

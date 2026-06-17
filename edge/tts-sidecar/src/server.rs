@@ -5,6 +5,9 @@
 //!
 //! Returns 200 audio/wav on success, 500 application/json on error.
 
+use std::io::Read as _;
+
+use misaki_rs::{Language, G2P};
 use serde::Deserialize;
 use tiny_http::{Method, Response, Server};
 
@@ -14,6 +17,9 @@ use crate::{
     vocab::build_vocab,
     wav::encode_wav,
 };
+
+/// Maximum allowed request body size (64 KiB).
+const MAX_BODY_BYTES: u64 = 64 * 1024;
 
 #[derive(Deserialize)]
 struct SpeechRequest {
@@ -34,6 +40,7 @@ pub struct AppState {
     pub session: std::sync::Mutex<ort::session::Session>,
     pub voices: Voices,
     pub vocab: std::collections::HashMap<char, i64>,
+    pub g2p: G2P,
 }
 
 impl AppState {
@@ -49,10 +56,14 @@ impl AppState {
         let vocab = build_vocab();
         eprintln!("[tts] vocab built ({} entries)", vocab.len());
 
+        let g2p = G2P::new(Language::EnglishUS);
+        eprintln!("[tts] G2P initialised");
+
         Ok(Self {
             session: std::sync::Mutex::new(session),
             voices,
             vocab,
+            g2p,
         })
     }
 }
@@ -63,7 +74,7 @@ fn handle_speech(state: &AppState, req_body: &str) -> Result<Vec<u8>, String> {
 
     let speed = req.speed.clamp(0.5, 2.0);
 
-    let token_ids = text_to_token_ids(&req.input, &state.vocab)?;
+    let token_ids = text_to_token_ids(&req.input, &state.vocab, &state.g2p)?;
     let n_tokens = token_ids.len();
 
     let style = state.voices.style_vector(&req.voice, n_tokens)?;
@@ -100,8 +111,22 @@ pub fn run(state: AppState, listen_addr: &str) -> ! {
             continue;
         }
 
+        // Reject oversized bodies before reading.
+        if let Some(len) = request.body_length() {
+            if len as u64 > MAX_BODY_BYTES {
+                let _ = request
+                    .respond(Response::from_string("payload too large").with_status_code(413));
+                continue;
+            }
+        }
+
         let mut body = String::new();
-        if request.as_reader().read_to_string(&mut body).is_err() {
+        if request
+            .as_reader()
+            .take(MAX_BODY_BYTES)
+            .read_to_string(&mut body)
+            .is_err()
+        {
             let _ = request.respond(Response::from_string("bad request").with_status_code(400));
             continue;
         }
@@ -119,7 +144,8 @@ pub fn run(state: AppState, listen_addr: &str) -> ! {
             }
             Err(e) => {
                 eprintln!("[tts] error: {e}");
-                let resp = Response::from_string(format!("{{\"error\":\"{e}\"}}"))
+                let body = serde_json::json!({"error": e}).to_string();
+                let resp = Response::from_string(body)
                     .with_header(
                         "Content-Type: application/json"
                             .parse::<tiny_http::Header>()
