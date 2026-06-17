@@ -114,6 +114,11 @@ path = "tests/integration/attach_perf.rs"
 name = "voice_pipeline"
 path = "tests/voice_pipeline.rs"
 
+# Voice pillar (spec 009) — HttpStt/HttpTts hermetic HTTP adapter tests.
+[[test]]
+name = "http_voice_engines"
+path = "tests/http_voice_engines.rs"
+
 # 006 — vault sync unit tests
 [[test]]
 name = "vault_crdt_init"

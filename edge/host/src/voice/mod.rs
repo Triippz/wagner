@@ -33,11 +33,24 @@
 //! | `types::{AudioChunk, Transcript, SpeechChunk, VoiceError}` | Core domain types |
 //! | `stt::{Stt, FakeStt}` | STT port + test double |
 //! | `tts::{Tts, FakeTts}` | TTS port + test double |
+//! | `http_stt::HttpStt` | Production STT adapter (faster-whisper-server) |
+//! | `http_tts::HttpTts` | Production TTS adapter (Kokoro-FastAPI) |
 //! | `router::{VoiceRouter, RouteRequest, EngineHandles}` | Engine selection |
 //! | `pipeline::{VoicePipeline, PipelineResult}` | STT→TTS sequencing |
 
+pub mod http_stt;
+pub mod http_tts;
 pub mod pipeline;
 pub mod router;
 pub mod stt;
 pub mod tts;
 pub mod types;
+
+// Convenience re-exports so callers can write `voice::HttpStt` / `voice::HttpTts`
+// without reaching into submodules.
+pub use http_stt::HttpStt;
+pub use http_tts::HttpTts;
+
+// Re-export the domain types and router items at this level for test convenience.
+pub use router::{EngineHandles, RouteRequest, VoiceRouter};
+pub use types::{AudioChunk, SpeechChunk, Transcript, VoiceError};

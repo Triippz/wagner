@@ -22,7 +22,7 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 jsonschema = "0.18"
 async-trait = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 portable-pty = "0.8"
 # Embedded memory/learnings store — pure-Rust SurrealKV backend, pinned to 2.x
 # (3.1's diskann/fastnum deps need a newer rustc than the carried 1.90 toolchain).

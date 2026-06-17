@@ -65,6 +65,27 @@ impl VoiceRouter {
         Self::default()
     }
 
+    /// Create a router pre-wired with HTTP engines as the `"local"` engine.
+    ///
+    /// `stt_url` is the faster-whisper-server base URL (e.g. `"http://127.0.0.1:8771"`).
+    /// `tts_url` is the Kokoro-FastAPI base URL (e.g. `"http://127.0.0.1:8772"`).
+    ///
+    /// These URLs are passed verbatim to the adapters — no process is started.
+    /// The operator is responsible for running the sidecars before routing
+    /// real audio through this router.
+    pub fn default_http(
+        stt_url: impl Into<String>,
+        tts_url: impl Into<String>,
+    ) -> Self {
+        use crate::voice::http_stt::HttpStt;
+        use crate::voice::http_tts::HttpTts;
+        Self::new().register(
+            "local",
+            Arc::new(HttpStt::new(stt_url)),
+            Arc::new(HttpTts::new(tts_url)),
+        )
+    }
+
     /// Register an `(Stt, Tts)` pair under `tag`.
     pub fn register(
         mut self,
