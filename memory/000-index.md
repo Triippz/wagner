@@ -17,6 +17,7 @@ The live build state lives in `../build-context.md`.
 - [[002-run-is-session]] — a Run IS a session; events already carry run_id; reducer-only keying.
 - [[003-acceptance-harness-strategy]] — how "done" is gated without a native E2E (fake agent + mock transport).
 - [[004-roadmap-and-parallelization]] — phase DAG and which lanes run in parallel.
+- [[005-repo-commit-hooks]] — git hook constraints; commits land on feat/autonomous-build.
 
 ## Conventions
 

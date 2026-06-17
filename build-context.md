@@ -26,8 +26,11 @@ Authoritative design: `docs/wagner-vision-and-architecture.md`. Kickoff:
 
 ## Operating rules (the autonomy contract)
 
-1. **Commit each green step to `main`.** One atomic commit per plan step, ONLY
-   when `make verify` is green. **Never commit red.** No pushes (no remote).
+1. **Commit each green step** to **`feat/autonomous-build`** (a harness hook
+   blocks direct `main` commits unattended — see `memory/005`; operator
+   fast-forwards `main` on waking). One atomic commit per plan step, ONLY when
+   `make verify` is green. **Never commit red.** No pushes (no remote). Commit
+   messages: no "Claude"/AI references; stage explicit paths (no `git add -A`).
 2. **Backups before large edits** → `.backups/` (gitignored). Global convention.
 3. **TDD always.** Red test → implement → green → refactor → commit.
 4. **Acceptance-gated.** `make verify` = fast gate (unit+integration+build).
