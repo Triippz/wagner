@@ -22,7 +22,6 @@
 //! Each model downloads to `<filename>.partial` and is atomically renamed to
 //! the final path only after SHA-256 verification passes.
 
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -139,12 +138,17 @@ pub enum ModelError {
 /// Only `Absent` and `Ready` are reported — transient live states
 /// (`Downloading`/`Verifying`) are not meaningful after the process has
 /// restarted.
+///
+/// A1/A2: use `symlink_metadata` instead of `exists` (which follows symlinks).
+/// A planted symlink is treated as Absent — it could point anywhere and would
+/// not be verified by SHA-256 before use.
 pub fn model_state_on_disk(dir: &Path, def: &ModelDef) -> ModelState {
     let path = dir.join(def.filename);
-    if path.exists() {
-        ModelState::Ready
-    } else {
-        ModelState::Absent
+    match path.symlink_metadata() {
+        // Regular file — present and not a symlink.
+        Ok(meta) if meta.file_type().is_file() => ModelState::Ready,
+        // Anything else (symlink, dir, missing) → treat as absent.
+        _ => ModelState::Absent,
     }
 }
 
@@ -222,8 +226,15 @@ where
     let partial_path: PathBuf = dir.join(format!("{}.partial", def.filename));
 
     // Skip if already verified on disk.
+    // R5: verify_sha256 reads up to ~250 MB synchronously; wrap it in
+    // spawn_blocking so it never stalls the tokio runtime.
     if final_path.exists() {
-        if verify_sha256(&final_path, def.sha256).is_ok() {
+        let fp = final_path.clone();
+        let sha = def.sha256;
+        let already_ok = tokio::task::spawn_blocking(move || verify_sha256(&fp, sha).is_ok())
+            .await
+            .unwrap_or(false);
+        if already_ok {
             on_progress(ModelProgress {
                 model: def.id.into(),
                 state: ModelState::Ready,
@@ -233,13 +244,13 @@ where
             return Ok(());
         }
         // Bad checksum — remove and re-download.
-        std::fs::remove_file(&final_path).map_err(|e| ModelError::Io {
+        tokio::fs::remove_file(&final_path).await.map_err(|e| ModelError::Io {
             model: def.id.into(),
             source: e,
         })?;
     }
     // Remove any leftover partial from a previous interrupted run.
-    let _ = std::fs::remove_file(&partial_path);
+    let _ = tokio::fs::remove_file(&partial_path).await;
 
     // --- Downloading ---
     on_progress(ModelProgress {
@@ -269,7 +280,8 @@ where
     let total = resp.content_length().unwrap_or(0);
     let mut received: u64 = 0;
 
-    let mut file = std::fs::File::create(&partial_path).map_err(|e| ModelError::Io {
+    // R5: use tokio::fs::File so write_all/flush are non-blocking.
+    let mut file = tokio::fs::File::create(&partial_path).await.map_err(|e| ModelError::Io {
         model: def.id.into(),
         source: e,
     })?;
@@ -283,7 +295,8 @@ where
         match chunk {
             None => break,
             Some(bytes) => {
-                file.write_all(&bytes).map_err(|e| ModelError::Io {
+                use tokio::io::AsyncWriteExt as _;
+                file.write_all(&bytes).await.map_err(|e| ModelError::Io {
                     model: def.id.into(),
                     source: e,
                 })?;
@@ -298,10 +311,13 @@ where
         }
     }
     // Flush to disk before verifying.
-    file.flush().map_err(|e| ModelError::Io {
-        model: def.id.into(),
-        source: e,
-    })?;
+    {
+        use tokio::io::AsyncWriteExt as _;
+        file.flush().await.map_err(|e| ModelError::Io {
+            model: def.id.into(),
+            source: e,
+        })?;
+    }
     drop(file);
 
     // --- Verifying ---
@@ -312,13 +328,26 @@ where
         total,
     });
 
-    verify_sha256(&partial_path, def.sha256).inspect_err(|_| {
+    // R5: verify_sha256 is a synchronous ~250 MB read; run it on a blocking thread.
+    let pp = partial_path.clone();
+    let expected = def.sha256;
+    let verify_result = tokio::task::spawn_blocking(move || verify_sha256(&pp, expected))
+        .await
+        .map_err(|e| ModelError::Io {
+            model: def.id.into(),
+            source: std::io::Error::other(e),
+        })?;
+
+    verify_result.inspect_err(|_| {
         // Clean up partial on checksum failure so the next run can retry.
-        let _ = std::fs::remove_file(&partial_path);
+        // Best-effort; ignore the error — the partial is already broken.
+        let pp2 = partial_path.clone();
+        let _ = std::fs::remove_file(pp2);
     })?;
 
     // Atomic rename: partial → final.
-    std::fs::rename(&partial_path, &final_path).map_err(|e| ModelError::Io {
+    // R5: use tokio::fs::rename so the cross-device rename case doesn't block.
+    tokio::fs::rename(&partial_path, &final_path).await.map_err(|e| ModelError::Io {
         model: def.id.into(),
         source: e,
     })?;

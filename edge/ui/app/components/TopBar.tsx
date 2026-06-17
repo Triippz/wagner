@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RunSnapshot } from "../../store/types";
 import { cmd } from "../bridge";
 
@@ -48,16 +48,25 @@ function voiceLabel(s: VoiceState): string {
 function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
   const [voiceState, setVoiceState] = useState<VoiceState>("off");
   const [toggling, setToggling] = useState(false);
+  // Track mount state so async toggle callbacks don't call setState after unmount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Fetch initial status on mount — best-effort (non-Tauri/mock → stays "off").
   useEffect(() => {
+    let alive = true;
     cmd.voiceStatus()
       .then(({ enabled, ready }) => {
+        if (!alive) return;
         if (enabled && ready) setVoiceState("on");
         else if (enabled) setVoiceState("starting");
         else setVoiceState("off");
       })
-      .catch(() => setVoiceState("off"));
+      .catch(() => { if (alive) setVoiceState("off"); });
+    return () => { alive = false; };
   }, []);
 
   const toggle = () => {
@@ -72,11 +81,13 @@ function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
     setVoiceState(turningOn ? "starting" : "off");
     cmd.voiceSetEnabled(turningOn)
       .then(({ enabled, ready }) => {
+        if (!mountedRef.current) return;
         if (enabled && ready) setVoiceState("on");
         else if (enabled) setVoiceState("starting");
         else setVoiceState("off");
       })
       .catch((e: unknown) => {
+        if (!mountedRef.current) return;
         const msg = String(e);
         if (turningOn && msg.includes("models not ready")) {
           // Surface the prompt directing the user to the settings panel.
@@ -86,7 +97,7 @@ function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
           setVoiceState(turningOn ? "error" : "off");
         }
       })
-      .finally(() => setToggling(false));
+      .finally(() => { if (mountedRef.current) setToggling(false); });
   };
 
   return { voiceState, toggling, toggle };

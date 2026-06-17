@@ -10,10 +10,21 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // Capture every invoke() call so assertions can inspect command + args.
 const invokes: Array<{ command: string; args: unknown }> = [];
 
+// Per-command realistic response shapes (mirrors Rust return types).
+const MOCK_RESPONSES: Record<string, unknown> = {
+  voice_status: { enabled: false, ready: false },
+  voice_set_enabled: { enabled: false, ready: false },
+  voice_models_status: { stt: "absent", tts: "absent" },
+  voice_download_models: undefined,
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => {
     invokes.push({ command, args: args ?? null });
-    return Promise.resolve(null);
+    const shape = Object.prototype.hasOwnProperty.call(MOCK_RESPONSES, command)
+      ? MOCK_RESPONSES[command]
+      : null;
+    return Promise.resolve(shape);
   },
   listen: () => Promise.resolve(() => {}),
 }));

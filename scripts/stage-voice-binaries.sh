@@ -33,6 +33,13 @@ if [[ -z "$TARGET" ]]; then
   fi
 fi
 
+# S2: Validate $TARGET against a target-triple pattern before using it in
+# filesystem paths; prevents path traversal via a crafted --target argument.
+if [[ ! "$TARGET" =~ ^[a-zA-Z0-9_]+-[a-zA-Z0-9_]+-[a-zA-Z0-9_.+-]+$ ]]; then
+  echo "ERROR: '$TARGET' does not look like a valid target triple (e.g. aarch64-apple-darwin)" >&2
+  exit 1
+fi
+
 echo "[stage-voice-binaries] target triple: $TARGET"
 
 # Locate whisper-server.

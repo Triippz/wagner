@@ -28,14 +28,22 @@ const HEALTH_POLL_DELAY: Duration = Duration::from_millis(300);
 /// two children and only ever start or stop the whole pair.
 /// ponytail: per-sidecar error recovery or selective restart would need a
 /// named map; not needed now.
+///
+/// `op_lock` serialises enable/disable to prevent a concurrent double-spawn
+/// race (R3): two concurrent `voice_set_enabled(true)` calls would both pass
+/// the `enabled && ready` idempotency guard mid-spawn, spawning four sidecars.
+/// Holding `op_lock` for the full enable/disable body prevents that.
 pub struct SidecarState {
     children: Mutex<Vec<CommandChild>>,
+    /// Serialises enable / disable to prevent concurrent double-spawn (R3).
+    pub op_lock: tokio::sync::Mutex<()>,
 }
 
 impl SidecarState {
     pub fn new() -> Self {
         Self {
             children: Mutex::new(Vec::new()),
+            op_lock: tokio::sync::Mutex::new(()),
         }
     }
 }
@@ -108,9 +116,11 @@ pub async fn spawn_sidecars(
         .spawn()
         .map_err(|e| format!("failed to spawn wagner-tts-sidecar: {e}"))?;
 
-    // Store handles before health-wait so they are killed on error too.
+    // Store handles before health-wait so they are killed on error too (R2).
     {
-        let mut guard = sc.children.lock().unwrap();
+        let mut guard = sc.children.lock().map_err(|_| {
+            "voice sidecar state poisoned".to_string()
+        })?;
         guard.push(stt_child);
         guard.push(tts_child);
     }
@@ -125,8 +135,18 @@ pub async fn spawn_sidecars(
 
 /// Kill all tracked sidecar children. Errors are logged but not surfaced —
 /// a kill failure should not prevent the manager from reaching disabled+not-ready.
-pub async fn kill_sidecars(sc: &tauri::State<'_, SidecarState>) {
-    let mut guard = sc.children.lock().unwrap();
+///
+/// R1: plain `fn` — no async work here, and holding a `MutexGuard` across an
+/// `async fn` body risks the guard being sent across await points.
+pub fn kill_sidecars(sc: &tauri::State<'_, SidecarState>) {
+    // R4: tolerate a poisoned lock; log and bail rather than panic.
+    let mut guard = match sc.children.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("[voice] sidecar state poisoned in kill_sidecars: {e}");
+            return;
+        }
+    };
     for child in guard.drain(..) {
         if let Err(e) = child.kill() {
             eprintln!("[voice] sidecar kill error: {e}");

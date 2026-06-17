@@ -4,8 +4,6 @@
   "description": "Least-privilege shell execution for the voice sidecars only",
   "windows": ["main"],
   "permissions": [
-    "shell:allow-spawn",
-    "shell:allow-kill",
     {
       "identifier": "shell:allow-execute",
       "allow": [

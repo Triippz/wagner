@@ -314,16 +314,39 @@ try {
   );
   await page.screenshot({ path: join(OUT, "12-voice-models-downloading.png") });
 
-  // Push ready events for both models.
+  // Push ready events for all three model files using the real Rust model ids
+  // (T2: panel maps "tts_model"/"tts_voices" → the TTS row).
+  // First push tts_model as downloading to confirm the TTS row reflects it.
   await page.evaluate(() => {
     window.__wagner.push("wagner://voice-download", {
       model: "stt", state: "ready", received: 74_000_000, total: 74_000_000,
     });
     window.__wagner.push("wagner://voice-download", {
-      model: "tts", state: "ready", received: 92_000_000, total: 92_000_000,
+      model: "tts_model", state: "downloading", received: 46_000_000, total: 92_000_000,
     });
   });
-  // Both model rows should now show "Ready".
+  // TTS row must show "Downloading" — confirms tts_model maps to the TTS row.
+  await page.waitForFunction(
+    () => {
+      const states = document.querySelectorAll(".voice-model-state");
+      return Array.from(states).some(
+        (el) => el.textContent && el.textContent.includes("Downloading")
+      );
+    },
+    { timeout: 5000 },
+  );
+  await page.screenshot({ path: join(OUT, "13a-tts-model-downloading.png") });
+
+  // Push final ready events for both TTS files — TTS row reaches "ready".
+  await page.evaluate(() => {
+    window.__wagner.push("wagner://voice-download", {
+      model: "tts_model", state: "ready", received: 92_000_000, total: 92_000_000,
+    });
+    window.__wagner.push("wagner://voice-download", {
+      model: "tts_voices", state: "ready", received: 12_000_000, total: 12_000_000,
+    });
+  });
+  // Both model rows (STT + TTS) should now show "Ready".
   await page.waitForFunction(
     () => {
       const states = document.querySelectorAll(".voice-model-state[data-tone='ready']");
@@ -345,7 +368,7 @@ try {
     console.error(`UI smoke FAILED — ${errors.length} console error(s):`);
     for (const e of errors) console.error("  " + e);
   } else {
-    console.log(`UI smoke PASSED — composer, multi-session rail, session focus-switch, console, inspector, permission, vault graph, console tab-return, voice toggle, voice settings panel (download progress, ready states) all render; 0 console errors. Shots in ${OUT}`);
+    console.log(`UI smoke PASSED — composer, multi-session rail, session focus-switch, console, inspector, permission, vault graph, console tab-return, voice toggle, voice settings panel (STT+TTS progress via real Rust model ids, tts_model/tts_voices→TTS row mapping, both rows reach ready) all render; 0 console errors. Shots in ${OUT}`);
   }
 } catch (e) {
   failed = true;

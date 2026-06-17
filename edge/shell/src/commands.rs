@@ -1013,7 +1013,11 @@ pub async fn voice_download_models(app: AppHandle) -> Result<(), String> {
     let dir = models_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create models dir: {e}"))?;
 
+    // B: limit redirects to 3 and reject non-HTTPS URLs so a compromised CDN
+    // cannot redirect the download to an unencrypted or attacker-controlled URL.
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .https_only(true)
         .build()
         .map_err(|e| format!("could not build HTTP client: {e}"))?;
 
@@ -1050,6 +1054,10 @@ pub fn voice_status(
 /// Idempotent: enabling when already up returns the current status without
 /// re-spawning. Spawn / health-wait failure returns a typed `Err(String)` and
 /// leaves `enabled = false` (Article III).
+///
+/// R3: `sc.op_lock` is held for the full body so that two concurrent
+/// `voice_set_enabled(true)` calls cannot both pass the idempotency guard and
+/// double-spawn. The re-check after lock acquisition is intentional.
 #[tauri::command]
 pub async fn voice_set_enabled(
     on: bool,
@@ -1057,8 +1065,12 @@ pub async fn voice_set_enabled(
     vm: State<'_, wagner_edge_host::voice::VoiceManager>,
     sc: State<'_, SidecarState>,
 ) -> Result<VoiceStatusDto, String> {
+    // Serialise enable/disable so concurrent calls can't both spawn (R3).
+    let _op = sc.op_lock.lock().await;
+
     if on {
-        // Idempotent: already running.
+        // Re-check idempotency under the lock (the status may have changed
+        // while we were waiting for op_lock).
         if vm.status().enabled && vm.status().ready {
             return Ok(vm.status().into());
         }
@@ -1081,6 +1093,9 @@ pub async fn voice_set_enabled(
                 vm.set_ready(true);
             }
             Err(e) => {
+                // R2: children were pushed into sc before health-wait; kill them
+                // now so no orphaned processes keep 8771/8772 bound.
+                crate::voice_lifecycle::kill_sidecars(&sc);
                 // Hard-fail: revert enabled, surface the error.
                 vm.set_enabled(false);
                 return Err(e);
@@ -1088,7 +1103,7 @@ pub async fn voice_set_enabled(
         }
     } else {
         // Kill sidecars; VoiceManager::set_enabled(false) also clears ready.
-        crate::voice_lifecycle::kill_sidecars(&sc).await;
+        crate::voice_lifecycle::kill_sidecars(&sc);
         vm.set_enabled(false);
     }
     Ok(vm.status().into())

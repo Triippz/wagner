@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { cmd } from "../bridge";
-
-// Model download states, mirroring the Rust lane contract.
-type ModelState = "absent" | "downloading" | "verifying" | "ready" | "failed";
+import type { ModelState } from "../bridge";
 
 interface ModelStatus {
   stt: ModelState;
@@ -10,11 +9,21 @@ interface ModelStatus {
 }
 
 // Progress payload from the `wagner://voice-download` channel.
+// Rust emits three model ids: "stt" | "tts_model" | "tts_voices".
+// Both TTS files map to the single "tts" UI row; we show the latest
+// observed state for either file (last-write wins is fine: they
+// sequence stt → tts_model → tts_voices, so the row stays "downloading"
+// until both are ready and the final tts_voices event arrives as "ready").
 interface DownloadProgressPayload {
-  model: "stt" | "tts";
+  model: "stt" | "tts_model" | "tts_voices";
   state: ModelState;
   received: number;
   total: number;
+}
+
+/** Map the three Rust model ids to the two UI row keys. */
+function uiRow(model: DownloadProgressPayload["model"]): "stt" | "tts" {
+  return model === "stt" ? "stt" : "tts";
 }
 
 type MockHandle = { on: (ch: string, cb: (p: unknown) => void) => () => void };
@@ -85,29 +94,46 @@ export function VoiceSettingsPanel({ onClose }: Props) {
 
   // Fetch initial status on mount — best-effort (non-Tauri/mock → stays absent).
   useEffect(() => {
+    let alive = true;
     cmd.voiceModelsStatus()
-      .then((s) => setStatus({ stt: s.stt as ModelState, tts: s.tts as ModelState }))
+      .then((s) => { if (alive) setStatus({ stt: s.stt, tts: s.tts }); })
       .catch(() => {}); // non-Tauri environment: leave default "absent"
+    return () => { alive = false; };
   }, []);
 
-  // Subscribe to live download progress via the mock/side-channel `on` API,
-  // mirroring how VaultPanel uses the side-channel for vault_graph_result.
+  // Subscribe to live download progress.
+  //
+  // Mock path: window.__wagner.on() side-channel (mirrors VaultPanel).
+  // Native path: Tauri listen() on the same channel name; unlisten is the cleanup.
+  //
+  // Both paths call uiRow() to map "tts_model"/"tts_voices" → the "tts" UI row.
   useEffect(() => {
     if (useMock) {
       const handle = (window as unknown as { __wagner?: MockHandle }).__wagner;
       if (!handle?.on) return;
       return handle.on("wagner://voice-download", (payload) => {
         const p = payload as DownloadProgressPayload;
-        setStatus((prev) => ({ ...prev, [p.model]: p.state }));
+        const row = uiRow(p.model);
+        setStatus((prev) => ({ ...prev, [row]: p.state }));
         setProgress((prev) => ({
           ...prev,
-          [p.model]: { received: p.received, total: p.total },
+          [row]: { received: p.received, total: p.total },
         }));
       });
     }
-    // In native mode the Rust lane emits progress over the same channel name;
-    // we'd wire a real listen() here in a future step — for now the mock seam
-    // is the primary test path for the UI.
+    // Native Tauri build: subscribe to the Rust-emitted progress channel.
+    // listen() returns a promise that resolves to the unlisten function.
+    let unlisten: (() => void) | null = null;
+    listen<DownloadProgressPayload>("wagner://voice-download", (event) => {
+      const p = event.payload;
+      const row = uiRow(p.model);
+      setStatus((prev) => ({ ...prev, [row]: p.state }));
+      setProgress((prev) => ({
+        ...prev,
+        [row]: { received: p.received, total: p.total },
+      }));
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
   }, []);
 
   const allReady = status.stt === "ready" && status.tts === "ready";

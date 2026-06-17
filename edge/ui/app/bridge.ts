@@ -83,6 +83,9 @@ export interface VaultGraphDto {
   edges: VaultEdgeDto[];
 }
 
+/** Mirrors `ModelState` in `edge/host/src/voice/models.rs`. */
+export type ModelState = "absent" | "downloading" | "verifying" | "ready" | "failed";
+
 export const cmd = {
   preflight: () => invoke<CliStatus>("preflight"),
   agentCatalog: (projectDir: string) =>
@@ -128,7 +131,7 @@ export const cmd = {
     invoke<{ enabled: boolean; ready: boolean }>("voice_set_enabled", { on }),
   /** Per-model download/readiness state for STT and TTS. */
   voiceModelsStatus: () =>
-    invoke<{ stt: string; tts: string }>("voice_models_status"),
+    invoke<{ stt: ModelState; tts: ModelState }>("voice_models_status"),
   /** Trigger download of all missing voice models into app-data. */
   voiceDownloadModels: () => invoke<void>("voice_download_models"),
 };

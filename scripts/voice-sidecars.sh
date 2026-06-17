@@ -86,11 +86,22 @@ verify_sha256() {
 # Download a file if it does not exist (or is 0 bytes). Atomic: downloads to
 # a .tmp file and moves into place only on success; a RETURN trap ensures
 # partial/interrupted downloads never leave a stale file.
+#
+# C: (i) SHA-256 is verified on the .tmp BEFORE mv (verify-before-rename).
+#    (ii) A present cached file is re-verified; a tampered cached file is
+#         removed and re-downloaded rather than silently accepted.
 download_if_missing() {
     local url="$1" dest="$2" label="$3" expected_sha="$4"
     if [[ -f "${dest}" && -s "${dest}" ]]; then
-        log "${label} already cached at ${dest}"
-        return 0
+        # C.ii: re-verify the cached copy; don't silently accept a tampered file.
+        local cached_actual
+        cached_actual="$(shasum -a 256 "${dest}" | awk '{print $1}')"
+        if [[ "${cached_actual}" == "${expected_sha}" ]]; then
+            log "${label} already cached and verified at ${dest}"
+            return 0
+        fi
+        log "WARNING: cached ${label} failed SHA-256 check; re-downloading"
+        rm -f "${dest}"
     fi
     log "downloading ${label} → ${dest}"
     mkdir -p "$(dirname "${dest}")"
@@ -101,9 +112,10 @@ download_if_missing() {
     trap 'rm -f "${tmp}"' RETURN
     # -f: fail on server error, -L: follow redirects, -C -: resume if partial
     curl -fL -C - --progress-bar -o "${tmp}" "${url}"
+    # C.i: verify SHA-256 on the .tmp BEFORE renaming to the final path.
+    verify_sha256 "${tmp}" "${expected_sha}" "${label}"
     mv "${tmp}" "${dest}"
     log "${label} download complete ($(du -h "${dest}" | cut -f1))"
-    verify_sha256 "${dest}" "${expected_sha}" "${label}"
 }
 
 # Return 0 if a process with the given PID is running.
