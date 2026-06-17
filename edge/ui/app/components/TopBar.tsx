@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import type { RunSnapshot } from "../../store/types";
 import { cmd } from "../bridge";
 
+// Callback type for opening the voice settings panel.
+type OpenVoiceSettings = () => void;
+
 type Tone = "drafted" | "running" | "needs-you" | "met" | "halted" | "aborted" | "paused";
 
 function statusTone(run: RunSnapshot | null, needsYou: boolean): { tone: Tone; label: string } {
@@ -26,20 +29,23 @@ const PHASE_LABEL: Record<string, string> = {
   halted: "halted",
 };
 
-// Voice toggle state machine: off | starting | on | error.
+// Voice toggle state machine: off | starting | on | error | models-needed.
 // "starting" covers the in-flight period after toggling on before ready=true lands.
-type VoiceState = "off" | "starting" | "on" | "error";
+// "models-needed" is a transient overlay state: shown briefly to direct the user
+// to the settings panel when the backend rejects with "models not ready".
+type VoiceState = "off" | "starting" | "on" | "error" | "models-needed";
 
 function voiceLabel(s: VoiceState): string {
   switch (s) {
-    case "on":       return "Voice on";
-    case "starting": return "Voice starting";
-    case "error":    return "Voice error";
-    default:         return "Voice off";
+    case "on":            return "Voice on";
+    case "starting":      return "Voice starting";
+    case "error":         return "Voice error";
+    case "models-needed": return "Download models";
+    default:              return "Voice off";
   }
 }
 
-function useVoiceToggle() {
+function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
   const [voiceState, setVoiceState] = useState<VoiceState>("off");
   const [toggling, setToggling] = useState(false);
 
@@ -56,6 +62,11 @@ function useVoiceToggle() {
 
   const toggle = () => {
     if (toggling) return;
+    // When in models-needed state, clicking the button opens the settings panel.
+    if (voiceState === "models-needed") {
+      onOpenSettings();
+      return;
+    }
     const turningOn = voiceState !== "on";
     setToggling(true);
     setVoiceState(turningOn ? "starting" : "off");
@@ -65,7 +76,16 @@ function useVoiceToggle() {
         else if (enabled) setVoiceState("starting");
         else setVoiceState("off");
       })
-      .catch(() => setVoiceState(turningOn ? "error" : "off"))
+      .catch((e: unknown) => {
+        const msg = String(e);
+        if (turningOn && msg.includes("models not ready")) {
+          // Surface the prompt directing the user to the settings panel.
+          setVoiceState("models-needed");
+          onOpenSettings();
+        } else {
+          setVoiceState(turningOn ? "error" : "off");
+        }
+      })
       .finally(() => setToggling(false));
   };
 
@@ -78,10 +98,11 @@ interface Props {
   busy: boolean;
   onAbort: () => void;
   onNewRun: () => void;
+  onOpenVoiceSettings: () => void;
 }
 
-export function TopBar({ run, needsYou, busy, onAbort, onNewRun }: Props) {
-  const { voiceState, toggling, toggle } = useVoiceToggle();
+export function TopBar({ run, needsYou, busy, onAbort, onNewRun, onOpenVoiceSettings }: Props) {
+  const { voiceState, toggling, toggle } = useVoiceToggle(onOpenVoiceSettings);
   const { tone, label } = statusTone(run, needsYou);
   const cost = run?.guardrails.cost;
   const used = cost?.used ?? 0;
@@ -138,6 +159,15 @@ export function TopBar({ run, needsYou, busy, onAbort, onNewRun }: Props) {
           onClick={toggle}
         >
           {voiceLabel(voiceState)}
+        </button>
+        <button
+          className="btn voice-settings-btn"
+          data-variant="ghost"
+          aria-label="Open voice settings"
+          onClick={onOpenVoiceSettings}
+          title="Voice settings"
+        >
+          Settings
         </button>
 
         {busy ? (

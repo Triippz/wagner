@@ -9,6 +9,7 @@ import { Inspector } from "./components/Inspector";
 import { TransmissionPrompt } from "./components/TransmissionPrompt";
 import { Composer } from "./components/Composer";
 import { VaultPanel } from "./components/VaultPanel";
+import { VoiceSettingsPanel } from "./components/VoiceSettingsPanel";
 
 type ActiveView = "console" | "vault";
 
@@ -24,6 +25,7 @@ export function App({ surface }: { surface: Surface }) {
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<RunSummary[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>("console");
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
 
   // Load persisted sessions on boot so the rail isn't empty before live events
   // (best-effort: in a non-Tauri/mock browser this invoke rejects → no summaries).
@@ -78,15 +80,20 @@ export function App({ surface }: { surface: Surface }) {
   if (composing || sessions.length === 0) {
     return (
       <div className="app">
-        <TopBar run={run} needsYou={needsYou} busy={false} onAbort={() => {}} onNewRun={newRun} />
+        <TopBar run={run} needsYou={needsYou} busy={false} onAbort={() => {}} onNewRun={newRun} onOpenVoiceSettings={() => setVoiceSettingsOpen(true)} />
         <Composer onLaunched={() => setComposing(false)} />
+        {voiceSettingsOpen && (
+          <div className="voice-settings-overlay">
+            <VoiceSettingsPanel onClose={() => setVoiceSettingsOpen(false)} />
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="app">
-      <TopBar run={run} needsYou={needsYou} busy={!!busy} onAbort={() => cmd.abort()} onNewRun={newRun} />
+      <TopBar run={run} needsYou={needsYou} busy={!!busy} onAbort={() => cmd.abort()} onNewRun={newRun} onOpenVoiceSettings={() => setVoiceSettingsOpen(true)} />
       <div className="view-body">
         <nav className="view-rail">
           <button
@@ -128,6 +135,11 @@ export function App({ surface }: { surface: Surface }) {
           </div>
         )}
       </div>
+      {voiceSettingsOpen && (
+        <div className="voice-settings-overlay">
+          <VoiceSettingsPanel onClose={() => setVoiceSettingsOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

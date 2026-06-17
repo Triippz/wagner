@@ -518,3 +518,84 @@ button {
 .vault-node[data-tier="core"]        { border-left: 3px solid var(--accent); }
 .vault-node[data-tier="supporting"]  { border-left: 3px solid var(--architects); }
 .vault-node[data-tier="peripheral"]  { border-left: 3px solid var(--forgers); }
+
+/* ---- Voice settings overlay ------------------------------------------- */
+.voice-settings-overlay {
+  position: fixed; inset: 0;
+  background: oklch(0 0 0 / 0.55);
+  display: grid; place-items: center;
+  z-index: var(--z-toast);
+  animation: overlay-in 0.18s var(--ease-out);
+}
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
+.voice-settings-panel {
+  width: min(480px, calc(100vw - 40px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  display: flex; flex-direction: column;
+  animation: panel-in 0.22s var(--ease-out);
+}
+@keyframes panel-in { from { opacity: 0; transform: scale(0.97) translateY(-6px); } to { opacity: 1; transform: none; } }
+
+.voice-settings-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.voice-settings-head h2 {
+  margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em;
+}
+
+.voice-settings-body {
+  padding: 18px 20px 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.voice-settings-lede { margin: 0; font-size: 13px; color: var(--ink-dim); line-height: 1.5; }
+
+.voice-settings-error { color: var(--alert); font-size: 12px; }
+
+/* ---- Voice model rows -------------------------------------------------- */
+.voice-models-list {
+  display: flex; flex-direction: column; gap: 1px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-md); overflow: hidden;
+}
+
+.voice-model-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center; gap: 12px;
+  padding: 11px 14px;
+  background: var(--surface-2);
+  grid-template-areas: "label state" "bar bar";
+}
+.voice-model-row + .voice-model-row { border-top: 1px solid var(--border-soft); }
+
+.voice-model-label {
+  grid-area: label;
+  font-size: 13px; font-weight: 500;
+}
+
+.voice-model-state {
+  grid-area: state;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+.voice-model-state[data-tone="ready"]    { color: var(--success); }
+.voice-model-state[data-tone="progress"] { color: var(--accent); }
+.voice-model-state[data-tone="failed"]   { color: var(--alert); }
+
+.voice-model-bar {
+  grid-area: bar;
+  height: 3px; border-radius: 99px;
+  background: var(--surface-3); overflow: hidden; margin-top: 4px;
+}
+.voice-model-bar > i {
+  display: block; height: 100%;
+  background: var(--accent);
+  transition: width 0.35s var(--ease-out);
+}

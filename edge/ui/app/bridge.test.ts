@@ -1,8 +1,9 @@
-// T022 — Voice command name + arg shape (RED-first, step 6).
+// T022 — Voice command name + arg shape (RED-first, step 6 + step 7).
 //
-// Asserts that cmd.voiceStatus() and cmd.voiceSetEnabled(on) call the correct
-// Tauri command names with the expected argument shapes. The @tauri-apps/api/core
-// module is mocked so no native shell is required.
+// Asserts that cmd.voiceStatus(), cmd.voiceSetEnabled(on), cmd.voiceModelsStatus(),
+// and cmd.voiceDownloadModels() call the correct Tauri command names with the
+// expected argument shapes. The @tauri-apps/api/core module is mocked so no
+// native shell is required.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -42,5 +43,16 @@ describe("cmd voice commands", () => {
   it("voiceSetEnabled(false) invokes 'voice_set_enabled' with { on: false }", async () => {
     await cmd.voiceSetEnabled(false).catch(() => {});
     expect(invokes).toContainEqual({ command: "voice_set_enabled", args: { on: false } });
+  });
+
+  // Step 7: model download manager commands (RED-first).
+  it("voiceModelsStatus() invokes 'voice_models_status' with no args", async () => {
+    await cmd.voiceModelsStatus().catch(() => {});
+    expect(invokes).toContainEqual({ command: "voice_models_status", args: null });
+  });
+
+  it("voiceDownloadModels() invokes 'voice_download_models' with no args", async () => {
+    await cmd.voiceDownloadModels().catch(() => {});
+    expect(invokes).toContainEqual({ command: "voice_download_models", args: null });
   });
 });

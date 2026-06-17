@@ -126,4 +126,9 @@ export const cmd = {
   /** Enable or disable the voice engine; returns updated state. */
   voiceSetEnabled: (on: boolean) =>
     invoke<{ enabled: boolean; ready: boolean }>("voice_set_enabled", { on }),
+  /** Per-model download/readiness state for STT and TTS. */
+  voiceModelsStatus: () =>
+    invoke<{ stt: string; tts: string }>("voice_models_status"),
+  /** Trigger download of all missing voice models into app-data. */
+  voiceDownloadModels: () => invoke<void>("voice_download_models"),
 };

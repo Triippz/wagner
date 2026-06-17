@@ -281,12 +281,71 @@ try {
   );
   await page.screenshot({ path: join(OUT, "10-voice-toggled.png") });
 
+  // 7) Voice settings panel — step 7.
+  //
+  // Open the panel via the "Settings" button in the TopBar, push synthetic
+  // wagner://voice-download progress events, and assert the panel reflects
+  // downloading → ready per model.
+  await page.waitForSelector(".voice-settings-btn", { timeout: 5000 });
+  await page.click(".voice-settings-btn");
+
+  // Panel should mount with a "Voice settings" heading.
+  await page.waitForSelector("text=Voice settings", { timeout: 5000 });
+  // Models list renders with the default "Not downloaded" states.
+  await page.waitForSelector("[data-testid='voice-models-list']", { timeout: 5000 });
+  await page.screenshot({ path: join(OUT, "11-voice-settings-open.png") });
+
+  // Push a downloading progress event for STT.
+  await page.evaluate(() => {
+    window.__wagner.push("wagner://voice-download", {
+      model: "stt",
+      state: "downloading",
+      received: 37_000_000,
+      total: 74_000_000,
+    });
+  });
+  // STT row should show "Downloading 50%" (50% of 74 MB).
+  await page.waitForFunction(
+    () => {
+      const states = document.querySelectorAll(".voice-model-state");
+      return Array.from(states).some((el) => el.textContent && el.textContent.includes("Downloading"));
+    },
+    { timeout: 5000 },
+  );
+  await page.screenshot({ path: join(OUT, "12-voice-models-downloading.png") });
+
+  // Push ready events for both models.
+  await page.evaluate(() => {
+    window.__wagner.push("wagner://voice-download", {
+      model: "stt", state: "ready", received: 74_000_000, total: 74_000_000,
+    });
+    window.__wagner.push("wagner://voice-download", {
+      model: "tts", state: "ready", received: 92_000_000, total: 92_000_000,
+    });
+  });
+  // Both model rows should now show "Ready".
+  await page.waitForFunction(
+    () => {
+      const states = document.querySelectorAll(".voice-model-state[data-tone='ready']");
+      return states.length >= 2;
+    },
+    { timeout: 5000 },
+  );
+  await page.screenshot({ path: join(OUT, "13-voice-models-ready.png") });
+
+  // Close the panel.
+  await page.click("button[aria-label='Close voice settings']");
+  await page.waitForFunction(
+    () => document.querySelector(".voice-settings-panel") === null,
+    { timeout: 3000 },
+  );
+
   if (errors.length) {
     failed = true;
     console.error(`UI smoke FAILED — ${errors.length} console error(s):`);
     for (const e of errors) console.error("  " + e);
   } else {
-    console.log(`UI smoke PASSED — composer, multi-session rail, session focus-switch, console, inspector, permission, vault graph, console tab-return, voice toggle all render; 0 console errors. Shots in ${OUT}`);
+    console.log(`UI smoke PASSED — composer, multi-session rail, session focus-switch, console, inspector, permission, vault graph, console tab-return, voice toggle, voice settings panel (download progress, ready states) all render; 0 console errors. Shots in ${OUT}`);
   }
 } catch (e) {
   failed = true;
