@@ -112,3 +112,7 @@ path = "tests/integration/attach_perf.rs"
 [[test]]
 name = "vault_crdt_init"
 path = "tests/unit/vault_crdt_init.rs"
+
+[[test]]
+name = "projector_file_to_crdt"
+path = "tests/unit/projector_file_to_crdt.rs"
