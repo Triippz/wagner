@@ -78,6 +78,9 @@ export const cmd = {
   getRun: (runId: string) => invoke<RunSnapshot>("get_run", { runId }),
   /** Resume a closed/paused session — rebuilds the loop and re-enters it. */
   resumeRun: (runId: string) => invoke<void>("resume_run", { runId }),
+  /** Add a goal to a session: injected live, or persisted + resumed if closed. */
+  addGoal: (runId: string, text: string) =>
+    invoke<void>("add_goal", { runId, text }),
   answerTransmission: (id: string, response: string) =>
     invoke<void>("answer_transmission", { id, response }),
 };

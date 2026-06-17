@@ -51,6 +51,16 @@ fn prepare_resumed(mut run: Run) -> Run {
     run
 }
 
+/// Append a goal to a session's goal thread and make it the current primary goal
+/// (the planner reads `goal`; `goals` keeps the history). ponytail: latest goal
+/// wins; per-goal independent completion would need a status per goal entry.
+fn append_goal(mut run: Run, text: String, now: String) -> Run {
+    run.goals.push(text.clone());
+    run.goal = text;
+    run.updated_at = now;
+    run
+}
+
 /// Everything `spawn_run_loop` needs to drive one session's goal loop. Grouped
 /// into a struct so both `start_run` (fresh) and `resume_run` (reloaded) build it
 /// the same way (and to keep the spawn signature off the clippy too-many-args path).
@@ -387,6 +397,49 @@ pub async fn resume_run(
         },
     );
     Ok(())
+}
+
+/// Add a goal to a session over its lifetime (acceptance E8). For a **live**
+/// session, inject the goal into the running loop via its steering console (the
+/// planner folds it into the next iteration). For a **closed** (paused/met)
+/// session, persist the goal to the goal thread, then resume — reactivating it.
+#[tauri::command]
+pub async fn add_goal(
+    app: AppHandle,
+    mgr: State<'_, RunManager>,
+    reg: State<'_, Arc<TransmissionRegistry>>,
+    run_id: String,
+    text: String,
+) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("goal must not be empty".into());
+    }
+    // Is the session live right now? (Release the lock before any await.)
+    let is_live = mgr.runs.lock().unwrap().contains_key(&run_id);
+    if is_live {
+        let guard = mgr.runs.lock().unwrap();
+        if let Some(ctl) = guard.get(&run_id) {
+            ctl.console.lock().unwrap().push(ConsoleInput {
+                ts: chrono::Utc::now().to_rfc3339(),
+                text: format!("New goal: {}", text.trim()),
+            });
+        }
+        return Ok(());
+    }
+    // Closed session: persist the appended goal, then resume to reactivate it.
+    let runs_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runs");
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let run = append_goal(
+        wagner_edge_host::state::load(&runs_root, &run_id).map_err(|e| e.to_string())?,
+        text.trim().to_string(),
+        now,
+    );
+    wagner_edge_host::state::save(&runs_root, &run).map_err(|e| e.to_string())?;
+    resume_run(app, mgr, reg, run_id).await
 }
 
 /// The workflow templates for the builder's picker (decision #4): the built-in
@@ -806,8 +859,29 @@ fn resolve_project_dir(
 
 #[cfg(test)]
 mod tests {
-    use super::{abort_targets, prepare_resumed, resolve_project_dir, validate_project_dir};
+    use super::{
+        abort_targets, append_goal, prepare_resumed, resolve_project_dir, validate_project_dir,
+    };
     use std::path::PathBuf;
+
+    #[test]
+    fn append_goal_adds_to_thread_and_becomes_primary() {
+        use wagner_edge_host::state::Run;
+        let run = Run::new(
+            "01J0GOAL00000000000000001".into(),
+            "first goal".into(),
+            vec![],
+            "2026-06-17T00:00:00Z".into(),
+        );
+        let updated = append_goal(run, "second goal".into(), "2026-06-17T05:00:00Z".into());
+        assert_eq!(
+            updated.goals,
+            vec!["first goal".to_string(), "second goal".to_string()]
+        );
+        // The planner reads `goal` (the current primary) — it's the new one.
+        assert_eq!(updated.goal, "second goal");
+        assert_eq!(updated.updated_at, "2026-06-17T05:00:00Z");
+    }
 
     #[test]
     fn prepare_resumed_sets_running_and_clears_halt() {
