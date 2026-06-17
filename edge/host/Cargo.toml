@@ -120,3 +120,11 @@ path = "tests/unit/projector_file_to_crdt.rs"
 [[test]]
 name = "projector_crdt_to_file"
 path = "tests/unit/projector_crdt_to_file.rs"
+
+[[test]]
+name = "sync_adapter_inmemory"
+path = "tests/unit/sync_adapter_inmemory.rs"
+
+[[test]]
+name = "snapshot_store_inmemory"
+path = "tests/unit/snapshot_store_inmemory.rs"
