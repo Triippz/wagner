@@ -5,7 +5,7 @@ CARGO_EDGE_HOST := -p wagner-edge-host
 
 .PHONY: dev cargo clippy e2e ts arch typecheck hub hub-e2e verify accept \
 	edge edge-build edge-ui shell dev-setup docker-hub sync-e2e voice-e2e \
-	gui-smoke
+	gui-smoke voice-up voice-down
 
 # Launch the live MV hub (Deno + Hono): OIDC + ephemeral discovery (long-running).
 dev:
@@ -89,8 +89,15 @@ docker-hub:
 sync-e2e:
 	cargo test -p wagner-edge-host --test vault_sync_n0_e2e -- --ignored --nocapture
 
+# Start/stop the STT+TTS sidecars (Docker) that voice-e2e expects on :8771/:8772.
+voice-up:
+	bash scripts/voice-sidecars.sh start
+voice-down:
+	bash scripts/voice-sidecars.sh stop
+
 # Real-sidecar voice smoke tests — requires faster-whisper-server on :8771
-# and Kokoro-FastAPI on :8772. Not part of `make verify` (marked #[ignore]).
+# and Kokoro-FastAPI on :8772 (run `make voice-up` first). Not part of
+# `make verify` (marked #[ignore]).
 voice-e2e:
 	cargo test -p wagner-edge-host --test http_voice_engines -- --ignored --nocapture
 

@@ -171,6 +171,9 @@ make edge-ui     # headless browser smoke test
 make docker-hub  # build hub image + docker compose up
 make dev-setup   # verify toolchain prerequisites
 make verify      # full pre-merge gate
+make voice-up    # start STT+TTS sidecars (Docker) on :8771/:8772
+make voice-down  # stop the voice sidecars
+make voice-e2e   # real-sidecar voice smoke tests (needs voice-up first)
 ```
 
 ---
@@ -192,6 +195,46 @@ wagner/
 ├── Makefile        Developer targets
 ├── Dockerfile      (hub/) multi-stage Deno build
 └── docker-compose.yml  hub service definition
+```
+
+---
+
+## Voice sidecars (STT + TTS)
+
+The voice pillar's `HttpStt` / `HttpTts` adapters call two OpenAI-compatible
+HTTP services. `make voice-e2e` (and live voice in the app) need them running:
+
+| Service | Port | Image | Endpoint |
+|---------|------|-------|----------|
+| STT | 8771 | `fedirz/faster-whisper-server:latest-cpu` | `POST /v1/audio/transcriptions` |
+| TTS | 8772 | `ghcr.io/remsky/kokoro-fastapi-cpu:latest` | `POST /v1/audio/speech` |
+
+```bash
+make voice-up      # pull (first run) + start both containers, wait until ready
+make voice-e2e     # run the #[ignore] real-sidecar smoke tests
+make voice-down    # stop + remove both containers
+```
+
+Models download on first use into Docker named volumes (`wagner-stt-cache`,
+`wagner-tts-cache`) and are cached across restarts. The launcher is
+`scripts/voice-sidecars.sh` (`start`/`stop`/`status`); swap the image tags there
+if upstream moves.
+
+**Note on `make voice-e2e`:** the smoke tests assert *no panic*, not a specific
+transcript — `stt_real_sidecar` feeds synthetic silence (raw PCM, no WAV
+container), which faster-whisper rejects with HTTP 500, and the test tolerates
+that. The production path (real captured WAV audio) works end-to-end; verify
+with a real clip:
+
+```bash
+# synthesize, then transcribe it back
+curl -s -X POST http://127.0.0.1:8772/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kokoro","input":"hello from Wagner","voice":"af_bella","response_format":"wav"}' \
+  -o /tmp/s.wav
+curl -s -X POST http://127.0.0.1:8771/v1/audio/transcriptions \
+  -F 'file=@/tmp/s.wav;type=audio/wav' -F 'model=whisper-1'
+# → {"text":"Hello from Wagner."}
 ```
 
 ---
