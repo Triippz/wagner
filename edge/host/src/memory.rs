@@ -12,6 +12,7 @@
 //! human-inspectable; SurrealDB is the queryable index, the files are the source of
 //! truth for curated memory. Central/cloud sync is deliberately out of scope here.
 
+use crate::vault::WikiLink;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use surrealdb::engine::local::{Db, SurrealKv};
@@ -158,6 +159,15 @@ impl MemoryStore {
             DEFINE ANALYZER IF NOT EXISTS wagner_en TOKENIZERS class FILTERS ascii, lowercase, snowball(english);
             DEFINE INDEX IF NOT EXISTS memory_project ON TABLE memory COLUMNS project_id;
             DEFINE INDEX IF NOT EXISTS memory_text ON TABLE memory COLUMNS text SEARCH ANALYZER wagner_en BM25;
+            DEFINE TABLE IF NOT EXISTS vault_name_index SCHEMALESS;
+            DEFINE INDEX IF NOT EXISTS name_idx_uid ON TABLE vault_name_index COLUMNS uid UNIQUE;
+            DEFINE INDEX IF NOT EXISTS name_idx_name ON TABLE vault_name_index COLUMNS display_name;
+            DEFINE TABLE IF NOT EXISTS vault_wikilink SCHEMALESS;
+            DEFINE INDEX IF NOT EXISTS wikilink_source ON TABLE vault_wikilink COLUMNS source_uid;
+            DEFINE TABLE IF NOT EXISTS vault_backlink SCHEMALESS;
+            DEFINE INDEX IF NOT EXISTS backlink_target ON TABLE vault_backlink COLUMNS target_uid;
+            DEFINE TABLE IF NOT EXISTS vault_relationship SCHEMALESS;
+            DEFINE INDEX IF NOT EXISTS rel_source ON TABLE vault_relationship COLUMNS source_uid;
             "#,
         )
         .await?
@@ -228,6 +238,125 @@ impl MemoryStore {
             .collect::<Vec<_>>()
             .join("\n");
         Some(format!("PRIOR LEARNINGS (from earlier runs):\n{block}"))
+    }
+
+    // ---- Vault link graph (Plan 004 step 3) — deterministic links/backlinks. ----
+
+    /// Record (or refresh) a note's canonical display name for link resolution.
+    /// Idempotent per uid (UPSERT on a known record id).
+    pub async fn upsert_name_index(
+        &self,
+        uid: &str,
+        display_name: &str,
+    ) -> surrealdb::Result<()> {
+        self.db
+            .query("UPSERT type::thing('vault_name_index', $uid) SET uid = $uid, display_name = $name")
+            .bind(("uid", uid.to_string()))
+            .bind(("name", display_name.to_string()))
+            .await?
+            .check()?;
+        Ok(())
+    }
+
+    /// Resolve a `[[display name]]` to a note uid, if one is indexed.
+    pub async fn resolve_name(&self, display_name: &str) -> surrealdb::Result<Option<String>> {
+        #[derive(Deserialize)]
+        struct UidProj {
+            uid: String,
+        }
+        let mut res = self
+            .db
+            .query("SELECT uid FROM vault_name_index WHERE display_name = $name LIMIT 1")
+            .bind(("name", display_name.to_string()))
+            .await?;
+        let rows: Vec<UidProj> = res.take(0)?;
+        Ok(rows.into_iter().next().map(|r| r.uid))
+    }
+
+    /// Replace the raw wikilinks recorded for a source note. Each row carries the
+    /// resolved target uid ("" when the target isn't indexed yet).
+    pub async fn write_wikilinks(
+        &self,
+        source_uid: &str,
+        links: &[WikiLink],
+    ) -> surrealdb::Result<()> {
+        self.db
+            .query("DELETE vault_wikilink WHERE source_uid = $s")
+            .bind(("s", source_uid.to_string()))
+            .await?
+            .check()?;
+        for l in links {
+            let resolved = self.resolve_name(&l.display_name).await?.unwrap_or_default();
+            self.db
+                .query("CREATE vault_wikilink SET source_uid = $s, display_name = $d, resolved_uid = $r")
+                .bind(("s", source_uid.to_string()))
+                .bind(("d", l.display_name.clone()))
+                .bind(("r", resolved))
+                .await?
+                .check()?;
+        }
+        Ok(())
+    }
+
+    /// Replace the backlinks for a source note: one inbound edge per resolved
+    /// target (target ← source).
+    pub async fn write_backlinks(
+        &self,
+        source_uid: &str,
+        target_uids: &[String],
+    ) -> surrealdb::Result<()> {
+        self.db
+            .query("DELETE vault_backlink WHERE source_uid = $s")
+            .bind(("s", source_uid.to_string()))
+            .await?
+            .check()?;
+        for t in target_uids {
+            self.db
+                .query("CREATE vault_backlink SET target_uid = $t, source_uid = $s")
+                .bind(("t", t.clone()))
+                .bind(("s", source_uid.to_string()))
+                .await?
+                .check()?;
+        }
+        Ok(())
+    }
+
+    /// The note uids that link TO `target_uid` (its inbound backlinks).
+    pub async fn backlinks_for(&self, target_uid: &str) -> surrealdb::Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct SrcProj {
+            source_uid: String,
+        }
+        let mut res = self
+            .db
+            .query("SELECT source_uid FROM vault_backlink WHERE target_uid = $t")
+            .bind(("t", target_uid.to_string()))
+            .await?;
+        let rows: Vec<SrcProj> = res.take(0)?;
+        Ok(rows.into_iter().map(|r| r.source_uid).collect())
+    }
+
+    /// Replace a source note's typed relationships (`(target_uid, rel_type)`).
+    pub async fn write_relationships(
+        &self,
+        source_uid: &str,
+        rels: &[(String, String)],
+    ) -> surrealdb::Result<()> {
+        self.db
+            .query("DELETE vault_relationship WHERE source_uid = $s")
+            .bind(("s", source_uid.to_string()))
+            .await?
+            .check()?;
+        for (target, rel_type) in rels {
+            self.db
+                .query("CREATE vault_relationship SET source_uid = $s, target_uid = $t, rel_type = $rt")
+                .bind(("s", source_uid.to_string()))
+                .bind(("t", target.clone()))
+                .bind(("rt", rel_type.clone()))
+                .await?
+                .check()?;
+        }
+        Ok(())
     }
 
     /// Project a saved learning to git-diffable Markdown under the project's
@@ -375,6 +504,82 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = MemoryStore::open(dir.path(), "tester").await.unwrap();
         (store, dir)
+    }
+
+    fn link(name: &str) -> crate::vault::WikiLink {
+        crate::vault::WikiLink { display_name: name.into(), alias: None }
+    }
+
+    #[tokio::test]
+    async fn name_index_upsert_and_resolve() {
+        let (store, _d) = temp_store().await;
+        store.upsert_name_index("01ABC", "Auth Flow").await.unwrap();
+        assert_eq!(store.resolve_name("Auth Flow").await.unwrap().as_deref(), Some("01ABC"));
+        // Idempotent: re-upserting the same uid doesn't duplicate or error.
+        store.upsert_name_index("01ABC", "Auth Flow").await.unwrap();
+        assert_eq!(store.resolve_name("Auth Flow").await.unwrap().as_deref(), Some("01ABC"));
+        assert!(store.resolve_name("Nonexistent").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn wikilinks_written_and_queryable() {
+        let (store, _d) = temp_store().await;
+        store.write_wikilinks("01A", &[link("X"), link("Y")]).await.unwrap();
+        #[derive(serde::Deserialize)]
+        struct Row {
+            #[allow(dead_code)]
+            source_uid: String,
+        }
+        let mut res = store
+            .db
+            .query("SELECT source_uid FROM vault_wikilink WHERE source_uid = $s")
+            .bind(("s", "01A".to_string()))
+            .await
+            .unwrap();
+        let rows: Vec<Row> = res.take(0).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Re-writing replaces (not appends).
+        store.write_wikilinks("01A", &[link("Z")]).await.unwrap();
+        let mut res2 = store
+            .db
+            .query("SELECT source_uid FROM vault_wikilink WHERE source_uid = $s")
+            .bind(("s", "01A".to_string()))
+            .await
+            .unwrap();
+        let rows2: Vec<Row> = res2.take(0).unwrap();
+        assert_eq!(rows2.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn backlinks_for_resolves_inbound() {
+        let (store, _d) = temp_store().await;
+        store.write_backlinks("01A", &["01B".to_string()]).await.unwrap();
+        assert_eq!(store.backlinks_for("01B").await.unwrap(), vec!["01A".to_string()]);
+        assert!(store.backlinks_for("01ZZZ").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wikilink_resolves_to_indexed_uid() {
+        let (store, _d) = temp_store().await;
+        // Index "Auth Flow" -> 01TARGET, then a link to it records the resolved uid.
+        store.upsert_name_index("01TARGET", "Auth Flow").await.unwrap();
+        store.write_wikilinks("01SRC", &[link("Auth Flow"), link("Unknown")]).await.unwrap();
+        #[derive(serde::Deserialize)]
+        struct R {
+            display_name: String,
+            resolved_uid: String,
+        }
+        let mut res = store
+            .db
+            .query("SELECT display_name, resolved_uid FROM vault_wikilink WHERE source_uid = $s")
+            .bind(("s", "01SRC".to_string()))
+            .await
+            .unwrap();
+        let rows: Vec<R> = res.take(0).unwrap();
+        let auth = rows.iter().find(|r| r.display_name == "Auth Flow").unwrap();
+        assert_eq!(auth.resolved_uid, "01TARGET");
+        let unknown = rows.iter().find(|r| r.display_name == "Unknown").unwrap();
+        assert_eq!(unknown.resolved_uid, ""); // unresolved → empty, not fatal
     }
 
     #[tokio::test]
