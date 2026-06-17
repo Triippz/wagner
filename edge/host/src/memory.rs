@@ -68,7 +68,7 @@ pub struct StoredTemplate {
 
 /// The embedded store. Holds one `Surreal<Db>` connection (SurrealKV file-backed).
 pub struct MemoryStore {
-    db: Surreal<Db>,
+    pub(crate) db: Surreal<Db>,
     /// Single-tenant default until a central server lands; carried on every row.
     user_id: String,
 }
@@ -113,6 +113,82 @@ pub enum StoreError {
     Db(#[from] surrealdb::Error),
 }
 
+// ── Vault graph types ──────────────────────────────────────────────────────
+// Plain-scalar structs only (SurrealDB 2.x serde constraint — no enums/Option).
+
+/// A single vault note as a graph node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VaultNode {
+    pub uid: String,
+    pub title: String,
+    pub tier: String,
+    pub lifecycle: String,
+}
+
+/// A directed edge between two vault notes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VaultEdge {
+    pub source_uid: String,
+    pub target_uid: String,
+    pub rel_type: String,
+}
+
+/// The full vault graph for one project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultGraph {
+    pub nodes: Vec<VaultNode>,
+    pub edges: Vec<VaultEdge>,
+}
+
+// Intermediate query result structs — only need the fields we SELECT.
+
+#[derive(Debug, Deserialize)]
+struct VaultNameRow {
+    uid: String,
+    display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultRelRow {
+    source_uid: String,
+    target_uid: String,
+    rel_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct VaultWikiRow {
+    source_uid: String,
+    resolved_uid: String,
+}
+
+/// Fields we need from `memory` rows with source_type = "vault".
+#[derive(Debug, Deserialize)]
+struct VaultMemRow {
+    uid: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// Extract `tier` from tags: first tag matching known tier values, else "".
+fn tier_from_tags(tags: &[String]) -> String {
+    for t in tags {
+        if matches!(t.as_str(), "core" | "supporting" | "peripheral") {
+            return t.clone();
+        }
+    }
+    String::new()
+}
+
+/// Extract `lifecycle` from tags: first tag matching known lifecycle values, else "".
+fn lifecycle_from_tags(tags: &[String]) -> String {
+    for t in tags {
+        if matches!(t.as_str(), "draft" | "active" | "archived") {
+            return t.clone();
+        }
+    }
+    String::new()
+}
+
 impl MemoryStore {
     /// Open (or create) the embedded store at `dir`, defining the schema/indexes
     /// idempotently. `user_id` stamps every row (single-tenant for now).
@@ -129,6 +205,24 @@ impl MemoryStore {
             DEFINE ANALYZER IF NOT EXISTS wagner_en TOKENIZERS class FILTERS ascii, lowercase, snowball(english);
             DEFINE INDEX IF NOT EXISTS memory_project ON TABLE memory COLUMNS project_id;
             DEFINE INDEX IF NOT EXISTS memory_text ON TABLE memory COLUMNS text SEARCH ANALYZER wagner_en BM25;
+            DEFINE TABLE IF NOT EXISTS vault_name_index SCHEMAFULL;
+            DEFINE FIELD IF NOT EXISTS uid ON TABLE vault_name_index TYPE string;
+            DEFINE FIELD IF NOT EXISTS display_name ON TABLE vault_name_index TYPE string;
+            DEFINE INDEX IF NOT EXISTS vault_name_uid ON TABLE vault_name_index COLUMNS uid UNIQUE;
+            DEFINE TABLE IF NOT EXISTS vault_wikilink SCHEMAFULL;
+            DEFINE FIELD IF NOT EXISTS source_uid ON TABLE vault_wikilink TYPE string;
+            DEFINE FIELD IF NOT EXISTS display_name ON TABLE vault_wikilink TYPE string;
+            DEFINE FIELD IF NOT EXISTS resolved_uid ON TABLE vault_wikilink TYPE string;
+            DEFINE INDEX IF NOT EXISTS vault_wiki_source ON TABLE vault_wikilink COLUMNS source_uid;
+            DEFINE TABLE IF NOT EXISTS vault_backlink SCHEMAFULL;
+            DEFINE FIELD IF NOT EXISTS target_uid ON TABLE vault_backlink TYPE string;
+            DEFINE FIELD IF NOT EXISTS source_uid ON TABLE vault_backlink TYPE string;
+            DEFINE INDEX IF NOT EXISTS vault_backlink_target ON TABLE vault_backlink COLUMNS target_uid;
+            DEFINE TABLE IF NOT EXISTS vault_relationship SCHEMAFULL;
+            DEFINE FIELD IF NOT EXISTS source_uid ON TABLE vault_relationship TYPE string;
+            DEFINE FIELD IF NOT EXISTS target_uid ON TABLE vault_relationship TYPE string;
+            DEFINE FIELD IF NOT EXISTS rel_type ON TABLE vault_relationship TYPE string;
+            DEFINE INDEX IF NOT EXISTS vault_rel_source ON TABLE vault_relationship COLUMNS source_uid;
             "#,
         )
         .await?
@@ -253,6 +347,80 @@ impl MemoryStore {
         let rows: Vec<StoredTemplate> = res.take(0)?;
         Ok(rows)
     }
+
+    /// Build the vault knowledge graph for a project: nodes from vault-typed memory
+    /// rows, edges from vault_relationship + resolved vault_wikilink rows.
+    pub async fn vault_graph(&self, project_id: &str) -> Result<VaultGraph, StoreError> {
+        // 1. Collect vault memory rows for this project.
+        let mut res = self
+            .db
+            .query("SELECT uid, tags FROM memory WHERE project_id = $pid AND source_type = 'vault'")
+            .bind(("pid", project_id.to_string()))
+            .await?;
+        let mem_rows: Vec<VaultMemRow> = res.take(0)?;
+
+        if mem_rows.is_empty() {
+            return Ok(VaultGraph { nodes: vec![], edges: vec![] });
+        }
+
+        let uids: Vec<String> = mem_rows.iter().map(|r| r.uid.clone()).collect();
+
+        // 2. Fetch display names.
+        let mut res2 = self
+            .db
+            .query("SELECT uid, display_name FROM vault_name_index WHERE uid IN $uids")
+            .bind(("uids", uids.clone()))
+            .await?;
+        let name_rows: Vec<VaultNameRow> = res2.take(0)?;
+        // Build lookup map uid → display_name.
+        let name_map: std::collections::HashMap<String, String> =
+            name_rows.into_iter().map(|r| (r.uid, r.display_name)).collect();
+
+        // 3. Build nodes.
+        let nodes: Vec<VaultNode> = mem_rows
+            .iter()
+            .map(|r| VaultNode {
+                uid: r.uid.clone(),
+                title: name_map.get(&r.uid).cloned().unwrap_or_default(),
+                tier: tier_from_tags(&r.tags),
+                lifecycle: lifecycle_from_tags(&r.tags),
+            })
+            .collect();
+
+        // 4. Relationship edges.
+        let mut res3 = self
+            .db
+            .query("SELECT source_uid, target_uid, rel_type FROM vault_relationship WHERE source_uid IN $uids")
+            .bind(("uids", uids.clone()))
+            .await?;
+        let rel_rows: Vec<VaultRelRow> = res3.take(0)?;
+
+        // 5. Wikilink edges (resolved only).
+        let mut res4 = self
+            .db
+            .query("SELECT source_uid, resolved_uid FROM vault_wikilink WHERE source_uid IN $uids AND resolved_uid != ''")
+            .bind(("uids", uids))
+            .await?;
+        let wiki_rows: Vec<VaultWikiRow> = res4.take(0)?;
+
+        // 6. Merge + deduplicate edges by (source, target, rel_type).
+        let mut seen = std::collections::HashSet::new();
+        let mut edges: Vec<VaultEdge> = Vec::new();
+        for r in rel_rows {
+            let key = (r.source_uid.clone(), r.target_uid.clone(), r.rel_type.clone());
+            if seen.insert(key) {
+                edges.push(VaultEdge { source_uid: r.source_uid, target_uid: r.target_uid, rel_type: r.rel_type });
+            }
+        }
+        for w in wiki_rows {
+            let key = (w.source_uid.clone(), w.resolved_uid.clone(), "wikilink".to_string());
+            if seen.insert(key) {
+                edges.push(VaultEdge { source_uid: w.source_uid, target_uid: w.resolved_uid, rel_type: "wikilink".to_string() });
+            }
+        }
+
+        Ok(VaultGraph { nodes, edges })
+    }
 }
 
 #[cfg(test)]
@@ -368,5 +536,121 @@ mod tests {
         let (store, _d) = temp_store().await;
         let wf = serde_json::json!({});
         assert!(store.save_template("!!!", "x", &wf, vec![], "2026-06-13T00:00:00Z").await.is_err());
+    }
+
+    // ── vault_graph tests ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn vault_graph_empty_project() {
+        let (store, _d) = temp_store().await;
+        let g = store.vault_graph("no-such-project").await.unwrap();
+        assert!(g.nodes.is_empty());
+        assert!(g.edges.is_empty());
+    }
+
+    #[tokio::test]
+    async fn vault_graph_returns_nodes_and_edges() {
+        let (store, _d) = temp_store().await;
+
+        // Insert two vault memory rows for project "vp".
+        let uid_a = ulid::Ulid::new().to_string();
+        let uid_b = ulid::Ulid::new().to_string();
+        let _: Option<MemoryRecord> = store
+            .db
+            .create(("memory", uid_a.as_str()))
+            .content(MemoryRecord {
+                uid: uid_a.clone(),
+                user_id: "tester".into(),
+                project_id: "vp".into(),
+                text: "note A".into(),
+                tags: vec!["core".into(), "active".into()],
+                created_at: "2026-06-13T00:00:01Z".into(),
+                curation_state: "auto".into(),
+                source_type: "vault".into(),
+                source_ref: String::new(),
+            })
+            .await
+            .unwrap();
+        let _: Option<MemoryRecord> = store
+            .db
+            .create(("memory", uid_b.as_str()))
+            .content(MemoryRecord {
+                uid: uid_b.clone(),
+                user_id: "tester".into(),
+                project_id: "vp".into(),
+                text: "note B".into(),
+                tags: vec!["supporting".into()],
+                created_at: "2026-06-13T00:00:02Z".into(),
+                curation_state: "auto".into(),
+                source_type: "vault".into(),
+                source_ref: String::new(),
+            })
+            .await
+            .unwrap();
+
+        // Name index entries.
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct NameRow { uid: String, display_name: String }
+        let _: Option<NameRow> = store
+            .db
+            .create(("vault_name_index", uid_a.as_str()))
+            .content(NameRow { uid: uid_a.clone(), display_name: "Note Alpha".into() })
+            .await
+            .unwrap();
+
+        // A vault_relationship edge A→B.
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct RelRow { source_uid: String, target_uid: String, rel_type: String }
+        let _: Option<RelRow> = store
+            .db
+            .create(("vault_relationship", "r1"))
+            .content(RelRow { source_uid: uid_a.clone(), target_uid: uid_b.clone(), rel_type: "references".into() })
+            .await
+            .unwrap();
+
+        // A resolved vault_wikilink B→A.
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct WikiRow { source_uid: String, display_name: String, resolved_uid: String }
+        let _: Option<WikiRow> = store
+            .db
+            .create(("vault_wikilink", "w1"))
+            .content(WikiRow { source_uid: uid_b.clone(), display_name: "Alpha".into(), resolved_uid: uid_a.clone() })
+            .await
+            .unwrap();
+
+        let g = store.vault_graph("vp").await.unwrap();
+
+        assert_eq!(g.nodes.len(), 2);
+        let node_a = g.nodes.iter().find(|n| n.uid == uid_a).expect("node A missing");
+        assert_eq!(node_a.title, "Note Alpha");
+        assert_eq!(node_a.tier, "core");
+        assert_eq!(node_a.lifecycle, "active");
+
+        let node_b = g.nodes.iter().find(|n| n.uid == uid_b).expect("node B missing");
+        assert_eq!(node_b.tier, "supporting");
+
+        assert_eq!(g.edges.len(), 2);
+        let rel_edge = g.edges.iter().find(|e| e.rel_type == "references").expect("references edge missing");
+        assert_eq!(rel_edge.source_uid, uid_a);
+        assert_eq!(rel_edge.target_uid, uid_b);
+
+        let wiki_edge = g.edges.iter().find(|e| e.rel_type == "wikilink").expect("wikilink edge missing");
+        assert_eq!(wiki_edge.source_uid, uid_b);
+        assert_eq!(wiki_edge.target_uid, uid_a);
+    }
+
+    #[tokio::test]
+    async fn vault_graph_excludes_non_vault_memory() {
+        let (store, _d) = temp_store().await;
+        // A normal (non-vault) memory row must NOT appear as a vault node.
+        store
+            .save_memory(
+                MemoryInput { project_id: "vp2".into(), text: "plain learning".into(), tags: vec![], source_type: None, source_ref: None },
+                "2026-06-13T00:00:01Z",
+            )
+            .await
+            .unwrap();
+        let g = store.vault_graph("vp2").await.unwrap();
+        assert!(g.nodes.is_empty(), "non-vault memory must not appear as vault node");
     }
 }
