@@ -1,0 +1,27 @@
+[package]
+name = "wagner-tts-sidecar"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+description = "Kokoro-82M ONNX TTS sidecar — OpenAI-compatible /v1/audio/speech endpoint for the Wagner voice pillar."
+
+[[bin]]
+name = "wagner-tts-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# ONNX runtime — pinned exactly; rc.12 is the last compatible release for Kokoro-82M.
+ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+# ndarray — pinned exactly to match ort's expectations.
+ndarray = "0.17"
+tiny_http = "0.12"
+hound = "3"
+# G2P — no espeak (GPL risk); pure-Rust misaki with default-features=false.
+misaki-rs = { version = "0.3", default-features = false }
+zip = "2"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

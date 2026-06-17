@@ -1,0 +1,137 @@
+//! Tiny HTTP server loop — single-threaded, blocking.
+//!
+//! Accepts POST /v1/audio/speech with JSON body:
+//!   `{ "model": "…", "input": "…", "voice": "…", "speed": 1.0 }`
+//!
+//! Returns 200 audio/wav on success, 500 application/json on error.
+
+use serde::Deserialize;
+use tiny_http::{Method, Response, Server};
+
+use crate::{
+    kokoro::{synthesize, text_to_token_ids},
+    voices::Voices,
+    vocab::build_vocab,
+    wav::encode_wav,
+};
+
+#[derive(Deserialize)]
+struct SpeechRequest {
+    #[allow(dead_code)]
+    model: String,
+    input: String,
+    voice: String,
+    #[serde(default = "default_speed")]
+    speed: f32,
+}
+
+fn default_speed() -> f32 {
+    1.0
+}
+
+/// All shared state behind a Mutex for the session.
+pub struct AppState {
+    pub session: std::sync::Mutex<ort::session::Session>,
+    pub voices: Voices,
+    pub vocab: std::collections::HashMap<char, i64>,
+}
+
+impl AppState {
+    pub fn new(model_path: &str, voices_path: &str) -> Result<Self, String> {
+        eprintln!("[tts] loading ONNX model from {model_path}");
+        let session = crate::kokoro::load_session(model_path)?;
+        eprintln!("[tts] model loaded");
+
+        eprintln!("[tts] loading voices from {voices_path}");
+        let voices = Voices::load(voices_path)?;
+        eprintln!("[tts] voices loaded ({} voices)", voices.data.len());
+
+        let vocab = build_vocab();
+        eprintln!("[tts] vocab built ({} entries)", vocab.len());
+
+        Ok(Self {
+            session: std::sync::Mutex::new(session),
+            voices,
+            vocab,
+        })
+    }
+}
+
+fn handle_speech(state: &AppState, req_body: &str) -> Result<Vec<u8>, String> {
+    let req: SpeechRequest =
+        serde_json::from_str(req_body).map_err(|e| format!("json parse: {e}"))?;
+
+    let speed = req.speed.clamp(0.5, 2.0);
+
+    let token_ids = text_to_token_ids(&req.input, &state.vocab)?;
+    let n_tokens = token_ids.len();
+
+    let style = state.voices.style_vector(&req.voice, n_tokens)?;
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|e| format!("session lock: {e}"))?;
+    let samples = synthesize(&mut session, &token_ids, &style, speed)?;
+    let wav = encode_wav(&samples)?;
+
+    eprintln!(
+        "[tts] voice={} tokens={} samples={} wav_bytes={}",
+        req.voice,
+        n_tokens,
+        samples.len(),
+        wav.len()
+    );
+
+    Ok(wav)
+}
+
+/// Start the HTTP server and block forever, serving requests.
+pub fn run(state: AppState, listen_addr: &str) -> ! {
+    let server = Server::http(listen_addr)
+        .unwrap_or_else(|e| panic!("failed to bind {listen_addr}: {e}"));
+    eprintln!("[tts] listening on http://{listen_addr}");
+
+    for mut request in server.incoming_requests() {
+        let method = request.method().clone();
+        let url = request.url().to_owned();
+
+        if method != Method::Post || url != "/v1/audio/speech" {
+            let _ = request.respond(Response::from_string("not found").with_status_code(404));
+            continue;
+        }
+
+        let mut body = String::new();
+        if request.as_reader().read_to_string(&mut body).is_err() {
+            let _ = request.respond(Response::from_string("bad request").with_status_code(400));
+            continue;
+        }
+
+        match handle_speech(&state, &body) {
+            Ok(wav_bytes) => {
+                let resp = Response::from_data(wav_bytes)
+                    .with_header(
+                        "Content-Type: audio/wav"
+                            .parse::<tiny_http::Header>()
+                            .unwrap(),
+                    )
+                    .with_status_code(200);
+                let _ = request.respond(resp);
+            }
+            Err(e) => {
+                eprintln!("[tts] error: {e}");
+                let resp = Response::from_string(format!("{{\"error\":\"{e}\"}}"))
+                    .with_header(
+                        "Content-Type: application/json"
+                            .parse::<tiny_http::Header>()
+                            .unwrap(),
+                    )
+                    .with_status_code(500);
+                let _ = request.respond(resp);
+            }
+        }
+    }
+
+    // tiny_http's `incoming_requests()` only returns when the server is shut
+    // down — which never happens in normal operation.
+    panic!("server loop exited unexpectedly");
+}

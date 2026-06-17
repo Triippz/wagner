@@ -3,7 +3,7 @@
 # (ratatui/crossterm) will be added as a sibling member when US1/US2 UI touches land.
 [workspace]
 resolver = "2"
-members = ["edge/host", "edge/shell"]
+members = ["edge/host", "edge/shell", "edge/tts-sidecar"]
 
 [workspace.package]
 edition = "2021"
