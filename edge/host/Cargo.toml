@@ -99,3 +99,8 @@ path = "tests/integration/devctx_privacy.rs"
 [[test]]
 name = "attach_perf"
 path = "tests/integration/attach_perf.rs"
+
+# Voice pillar (spec 007) — STT/TTS pipeline integration tests.
+[[test]]
+name = "voice_pipeline"
+path = "tests/voice_pipeline.rs"
