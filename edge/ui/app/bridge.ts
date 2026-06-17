@@ -121,4 +121,9 @@ export const cmd = {
     invoke<void>("answer_transmission", { id, response }),
   vaultGraph: (projectDir: string) =>
     invoke<VaultGraphDto>("vault_graph", { projectDir }),
+  /** Current voice-engine state. */
+  voiceStatus: () => invoke<{ enabled: boolean; ready: boolean }>("voice_status"),
+  /** Enable or disable the voice engine; returns updated state. */
+  voiceSetEnabled: (on: boolean) =>
+    invoke<{ enabled: boolean; ready: boolean }>("voice_set_enabled", { on }),
 };

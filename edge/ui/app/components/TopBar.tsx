@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import type { RunSnapshot } from "../../store/types";
+import { cmd } from "../bridge";
 
 type Tone = "drafted" | "running" | "needs-you" | "met" | "halted" | "aborted" | "paused";
 
@@ -24,6 +26,52 @@ const PHASE_LABEL: Record<string, string> = {
   halted: "halted",
 };
 
+// Voice toggle state machine: off | starting | on | error.
+// "starting" covers the in-flight period after toggling on before ready=true lands.
+type VoiceState = "off" | "starting" | "on" | "error";
+
+function voiceLabel(s: VoiceState): string {
+  switch (s) {
+    case "on":       return "Voice on";
+    case "starting": return "Voice starting";
+    case "error":    return "Voice error";
+    default:         return "Voice off";
+  }
+}
+
+function useVoiceToggle() {
+  const [voiceState, setVoiceState] = useState<VoiceState>("off");
+  const [toggling, setToggling] = useState(false);
+
+  // Fetch initial status on mount — best-effort (non-Tauri/mock → stays "off").
+  useEffect(() => {
+    cmd.voiceStatus()
+      .then(({ enabled, ready }) => {
+        if (enabled && ready) setVoiceState("on");
+        else if (enabled) setVoiceState("starting");
+        else setVoiceState("off");
+      })
+      .catch(() => setVoiceState("off"));
+  }, []);
+
+  const toggle = () => {
+    if (toggling) return;
+    const turningOn = voiceState !== "on";
+    setToggling(true);
+    setVoiceState(turningOn ? "starting" : "off");
+    cmd.voiceSetEnabled(turningOn)
+      .then(({ enabled, ready }) => {
+        if (enabled && ready) setVoiceState("on");
+        else if (enabled) setVoiceState("starting");
+        else setVoiceState("off");
+      })
+      .catch(() => setVoiceState(turningOn ? "error" : "off"))
+      .finally(() => setToggling(false));
+  };
+
+  return { voiceState, toggling, toggle };
+}
+
 interface Props {
   run: RunSnapshot | null;
   needsYou: boolean;
@@ -33,6 +81,7 @@ interface Props {
 }
 
 export function TopBar({ run, needsYou, busy, onAbort, onNewRun }: Props) {
+  const { voiceState, toggling, toggle } = useVoiceToggle();
   const { tone, label } = statusTone(run, needsYou);
   const cost = run?.guardrails.cost;
   const used = cost?.used ?? 0;
@@ -79,6 +128,17 @@ export function TopBar({ run, needsYou, busy, onAbort, onNewRun }: Props) {
             </div>
           </>
         )}
+
+        <button
+          className="btn voice-toggle"
+          data-variant="ghost"
+          data-voice={voiceState}
+          aria-label={voiceLabel(voiceState)}
+          disabled={toggling}
+          onClick={toggle}
+        >
+          {voiceLabel(voiceState)}
+        </button>
 
         {busy ? (
           <button className="btn" data-variant="danger" onClick={onAbort}>
