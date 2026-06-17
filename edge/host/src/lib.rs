@@ -20,6 +20,9 @@ pub mod vault;
 pub mod remote;
 pub mod tray;
 
+// Voice pillar (spec 007) — STT/TTS trait seam, router, and pipeline.
+pub mod voice;
+
 #[cfg(test)]
 mod foundation_tests {
     use crate::events::{
