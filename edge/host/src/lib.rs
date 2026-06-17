@@ -14,6 +14,7 @@ pub mod permission_server;
 pub mod schema;
 pub mod state;
 pub mod transmissions;
+pub mod vault;
 
 // wedge-002 surfaces (scaffolds, T002) — implemented test-first in later phases.
 pub mod remote;
