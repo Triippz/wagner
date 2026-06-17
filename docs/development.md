@@ -173,9 +173,10 @@ make edge-ui     # headless browser smoke test
 make docker-hub  # build hub image + docker compose up
 make dev-setup   # verify toolchain prerequisites
 make verify      # full pre-merge gate
-make voice-up    # start STT+TTS native sidecars on :8771/:8772
-make voice-down  # stop the native voice sidecars
+make voice-up    # start STT+TTS native sidecars on :8771/:8772 (dev stack)
+make voice-down  # stop the native voice sidecars (dev stack)
 make voice-e2e   # real-sidecar voice smoke tests (needs voice-up first)
+make edge-bundle # stage binaries + cargo tauri build → distributable .app
 ```
 
 ---
@@ -211,7 +212,9 @@ HTTP services on loopback. Both are native binaries — no Docker required.
 | STT | 8771 | `whisper-server` (whisper.cpp, `brew install whisper-cpp`) | `POST /v1/audio/transcriptions` |
 | TTS | 8772 | `wagner-tts-sidecar` (built from `edge/tts-sidecar` in this repo) | `POST /v1/audio/speech` |
 
-### Quick start
+### Two paths: dev stack vs. app-managed
+
+**Dev stack path** — for developing/testing the voice engines directly:
 
 ```bash
 make voice-up      # download models if missing → build TTS sidecar if missing → spawn both
@@ -219,26 +222,64 @@ make voice-e2e     # run the #[ignore] real-sidecar smoke tests
 make voice-down    # stop both sidecars
 ```
 
-### Model cache
+`make run` also boots these automatically alongside hub and the edge app (see
+"One-command dev stack" below).
 
-On first run, `make voice-up` downloads the models into
-`~/.cache/wagner-voice/models/` (≈ 165 MB total, cached across restarts):
+**App-managed path** — the shipped desktop app manages its own sidecars.
+When a user enables voice via the **in-app toggle** (TopBar), the app:
 
-| File | Size | Source |
-|------|------|--------|
-| `ggml-tiny.en.bin` | 74 MB | `ggerganov/whisper.cpp` on Hugging Face |
-| `model_quantized.onnx` | 88 MB | `onnx-community/Kokoro-82M-v1.0-ONNX` on Hugging Face |
-| `voices-v1.0.bin` | 27 MB | `thewh1teagle/kokoro-onnx` GitHub releases |
+1. Checks whether voice models are present in app-data; if not, prompts the
+   user to open the voice settings panel to download them first.
+2. Spawns both native sidecars via `tauri-plugin-shell` once models are ready.
+3. Health-waits `/health` on both ports before flipping the voice state to
+   `on`.
+4. Kills both sidecars when voice is disabled.
 
-Override the cache root with `WAGNER_VOICE_HOME=/your/path make voice-up`.
+Operators do **not** run `make voice-up` for the shipped app path — the toggle
+handles the full lifecycle.
 
-### Prerequisites
+### In-app voice toggle
+
+The **TopBar** shows a voice toggle button that reflects four states:
+
+| State | Meaning |
+|-------|---------|
+| `off` | Voice disabled; sidecars not running |
+| `starting` | Sidecars spawning; health-check in progress |
+| `on` | Both sidecars healthy; STT + TTS active |
+| `error` | A sidecar failed to start; details in the voice settings panel |
+
+Clicking the toggle calls `voice_set_enabled(true/false)` via `bridge.ts`
+(`voiceStatus` / `voiceSetEnabled`), which maps to the `voice_status` /
+`voice_set_enabled` host commands.
+
+### Voice settings panel + model download
+
+Models are **not bundled** in the `.app` — they download on first enable into
+app-data (≈ 165–240 MB total). The voice settings panel shows per-model
+progress and lets the user trigger or re-trigger a download.
+
+| Model file | Size | Source |
+|------------|------|--------|
+| `ggml-tiny.en.bin` (STT) | 74 MB | `ggerganov/whisper.cpp` on Hugging Face |
+| `kokoro-v1.0.onnx` (TTS, q8) | ~92 MB | `onnx-community/Kokoro-82M-v1.0-ONNX` on HF |
+| `voices-v1.0.bin` (TTS voices) | 27 MB | `thewh1teagle/kokoro-onnx` GitHub releases |
+
+Progress states per model: `absent` → `downloading` → `verifying` → `ready`
+(or `failed`, with a retry button). `voice_set_enabled(true)` is blocked with a
+"models not ready" prompt until all models reach `ready`.
+
+For the **dev stack**, `make voice-up` downloads the same models into
+`~/.cache/wagner-voice/models/` (separate from app-data). Override with
+`WAGNER_VOICE_HOME=/your/path make voice-up`.
+
+### Prerequisites (dev stack only)
 
 - `brew install whisper-cpp` (provides `whisper-server` on your PATH).
 - Rust toolchain (already required for `cargo` targets) — the TTS sidecar
   builds automatically the first time `make voice-up` runs.
 
-### Round-trip verification
+### Round-trip verification (dev stack)
 
 ```bash
 make voice-up
@@ -278,6 +319,31 @@ app window (or Ctrl-C), then run `make down` to stop the background services.
 
 The hub logs to `/tmp/wagner-hub.log`. Voice sidecar logs land in
 `~/.cache/wagner-voice/run/stt.log` and `~/.cache/wagner-voice/run/tts.log`.
+
+---
+
+## Bundling the app
+
+`make edge-bundle` builds a distributable `.app` containing both native voice
+binaries:
+
+```bash
+make edge-bundle   # stages binaries → cargo tauri build → .app bundle
+```
+
+The Tauri `bundle.externalBin` configuration (in `tauri.conf.json`) declares
+the two target-triple-suffixed binaries (`whisper-server` and
+`wagner-tts-sidecar`). The resulting `.app` is self-contained for the binaries;
+**models are not bundled** — the user downloads them on first voice-enable via
+the in-app settings panel.
+
+To verify a bundle from scratch (no dev binaries on PATH, no `make voice-up`):
+
+1. Build: `make edge-bundle`
+2. Launch the built `.app`
+3. Enable voice — the settings panel prompts for model download
+4. Download completes → enable voice → TTS → STT round-trip confirms the
+   bundled binaries work independently of the dev stack
 
 ---
 

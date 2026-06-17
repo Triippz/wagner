@@ -110,9 +110,9 @@ GossipSyncAdapter + IrohDocsStore (008). All on `feat/autonomous-build`;
 **Post-roadmap hardening (operator-requested "continue to 100%") — ALL DONE:**
 - [x] **n0 relays + live two-peer sync E2E** — `make sync-e2e` passes live over n0
   (commit `9bbb70a`); `vault_relay_mode()` seam, see `memory/008`.
-- [x] **Real STT/TTS wiring** — `HttpStt`/`HttpTts` (faster-whisper + Kokoro HTTP
-  sidecars) behind the voice trait seam; hermetic port-0 mock tests in `make
-  verify`; `make voice-e2e` (#[ignore]) for real sidecars. Commit `0298158`.
+- [x] **Real STT/TTS wiring** — `HttpStt`/`HttpTts` (native whisper.cpp + own
+  Rust TTS sidecar) behind the voice trait seam; hermetic port-0 mock tests in
+  `make verify`; `make voice-e2e` (#[ignore]) for real sidecars. Commit `0298158`.
 - [x] **E2E breadth + macOS native GUI smoke** — `?mock` journey now covers
   multi-session rail + focus-switch + Console/Vault tab round-trip (in `make
   accept`); `edge/ui/scripts/native-smoke.sh` + `make gui-smoke` launch the real
@@ -126,9 +126,28 @@ Every roadmap phase + all operator-requested hardening is implemented and green.
 hub-e2e` / `make sync-e2e` all pass. Operator: fast-forward `main`
 (`git checkout main && git merge --ff-only feat/autonomous-build`).
 Remaining is environment/ops only (not code): grant the terminal Accessibility
-permission to run `make gui-smoke`; stand up real faster-whisper/Kokoro sidecars
-for `make voice-e2e`; point at our own iroh relay when ready (one line in
-`vault_relay_mode()`).
+permission to run `make gui-smoke`; point at our own iroh relay when ready (one
+line in `vault_relay_mode()`).
+
+**Voice native bundle (feat/voice-native-bundle):** voice is now fully native
+and app-bundled — no Docker, no Python, no manual `make voice-up` for end users.
+- Native binaries: `whisper-server` (whisper.cpp, STT :8771) + `wagner-tts-sidecar`
+  (in-repo Rust crate, TTS :8772) declared in `bundle.externalBin`; bundled by
+  `make edge-bundle`.
+- In-app voice toggle (TopBar) wired through `bridge.ts` (`voiceStatus` /
+  `voiceSetEnabled`) to `voice_status` / `voice_set_enabled` host commands; four
+  states: off / starting / on / error.
+- App-managed sidecar lifecycle: enabling voice spawns both sidecars via
+  `tauri-plugin-shell`, health-waits `/health`, flips ready; disabling kills them.
+- Model download manager + voice settings panel: models are NOT bundled; they
+  download on first enable (~165–240 MB) into app-data with per-model progress
+  (absent / downloading / verifying / ready / failed). `voice_set_enabled(true)`
+  is gated with a "models not ready" prompt until download completes.
+- `make voice-up` / `make voice-e2e` remain for the **dev stack** path (sidecars
+  on the developer's PATH, models in `~/.cache/wagner-voice/`); they are not
+  needed for the shipped app.
+- `make voice-e2e` (#[ignore]) requires real sidecars to be running via
+  `make voice-up` first.
 
 **Resume protocol:** `git log --oneline -40` shows every step. Re-run `make verify`
 (+ `make hub-e2e`, `make accept`), then continue at the first unbuilt item above.
