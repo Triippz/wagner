@@ -70,10 +70,15 @@ try {
   }
   await page.screenshot({ path: join(OUT, "1-composer.png") });
 
-  // 2) A running run + two operatives + subtasks -> console view.
+  // 2) Push two run payloads with different run_ids to exercise multi-session rail.
+  //    Both arrive before any operative events so the rail is seeded from runs.
+  //    Both are "running" so onSelectSession does NOT call cmd.resumeRun() (which
+  //    requires the native Tauri invoke() absent in mock mode — see App.tsx line
+  //    "if (!live || live.status !== 'running') cmd.resumeRun(...)").
   const ts = new Date().toISOString();
   await page.evaluate((now) => {
     const w = window.__wagner;
+    // First run (running — the "newer" entry, will auto-focus)
     w.push("run", {
       schema: "wagner-run.v1", run_id: "01J0RUN",
       goal: "Add a /healthz endpoint with a test and wire it into the router.",
@@ -83,6 +88,16 @@ try {
         { id: "s1", agent_id: "cipher", prompt: "Write the failing /healthz test", state: "done", result_summary: "test added" },
         { id: "s2", agent_id: "vex", prompt: "Implement the handler + wire the router", state: "running" },
       ],
+      updated_at: now,
+    });
+    // Second run (also running — a concurrent session with a different goal).
+    w.push("run", {
+      schema: "wagner-run.v1", run_id: "01J0PEER",
+      goal: "Refactor database migrations to use transactional DDL.",
+      status: "running", phase: "planning", iteration: 1,
+      guardrails: { blocked_timeout_secs: 120, iterations_used: 1, cost: { mode: "cli_usage", budget: 5, used: 0.42 } },
+      subtasks: [],
+      updated_at: new Date(Date.now() - 60000).toISOString(), // older → listed second
     });
     const ev = (id, name, faction, activity, district, state, message) =>
       w.push("event", {
@@ -100,11 +115,57 @@ try {
   await page.waitForSelector(".session-rail", { timeout: 8000 });
   await page.waitForSelector("text=Sessions", { timeout: 8000 });
 
-  // 2b) Select an operative -> transcript inspector.
+  // 2a) Multi-session assertions: both rows must be visible, both with "running" dots.
+  await page.waitForSelector(".session-row", { timeout: 8000 });
+  const sessionRows = await page.locator(".session-row").count();
+  if (sessionRows < 2) {
+    throw new Error(`expected >= 2 session rows in the rail, got ${sessionRows}`);
+  }
+  // Both sessions are running — expect at least 2 "running" status dots.
+  const runningDots = await page.locator(".session-row .dot-running").count();
+  if (runningDots < 2) {
+    throw new Error(`expected >= 2 running-status dots in the session rail, got ${runningDots}`);
+  }
+  await page.screenshot({ path: join(OUT, "2a-multi-session-rail.png") });
+
+  // 2b) Focus-switch: the first run (01J0RUN) should auto-focus on arrival (it has
+  //     the newer updated_at). Now click the SECOND session row (01J0PEER) by its
+  //     unique goal text and assert the focused run changes.
+  //     We target the row that contains the "Refactor database" goal snippet.
+  await page.click(".session-row:has(.session-goal:has-text('Refactor'))");
+  // After clicking, the TopBar goal should reflect the newly focused run's goal.
+  await page.waitForFunction(
+    () => {
+      const g = document.querySelector(".topbar-goal");
+      return g && g.textContent && g.textContent.includes("Refactor database");
+    },
+    { timeout: 8000 }
+  );
+  // The Inspector (RunView) should also reflect the new run's id.
+  await page.waitForFunction(
+    () => {
+      const id = document.querySelector(".inspector-id");
+      return id && id.textContent && id.textContent.includes("01J0PEER");
+    },
+    { timeout: 8000 }
+  );
+  await page.screenshot({ path: join(OUT, "2b-session-focus-switch.png") });
+
+  // 2c) Switch focus back to the first run (01J0RUN) before continuing.
+  await page.click(".session-row:has(.session-goal:has-text('healthz'))");
+  await page.waitForFunction(
+    () => {
+      const g = document.querySelector(".topbar-goal");
+      return g && g.textContent && g.textContent.includes("healthz");
+    },
+    { timeout: 8000 }
+  );
+
+  // 2d) Select an operative -> transcript inspector.
   await page.click("text=Vex");
   await page.waitForSelector("text=Editing src/router.rs", { timeout: 8000 });
   await page.waitForTimeout(450); // let the entrance stagger settle for the shot
-  await page.screenshot({ path: join(OUT, "2-console.png") });
+  await page.screenshot({ path: join(OUT, "3-console.png") });
 
   // 3) A permission transmission -> needs-you prompt.
   await page.evaluate((now) => {
@@ -118,7 +179,7 @@ try {
   await page.waitForSelector("text=Permission requested", { timeout: 8000 });
   await page.waitForSelector("text=Needs you", { timeout: 8000 });
   await page.waitForTimeout(450);
-  await page.screenshot({ path: join(OUT, "3-permission.png") });
+  await page.screenshot({ path: join(OUT, "4-permission.png") });
 
   // 4) Vault graph smoke — dismiss the open transmission first so the Vault tab is enabled.
   await page.evaluate(() => {
@@ -149,7 +210,7 @@ try {
   });
 
   await page.waitForSelector(".vault-node", { timeout: 8000 });
-  await page.screenshot({ path: join(OUT, "4-vault-graph.png") });
+  await page.screenshot({ path: join(OUT, "5-vault-graph.png") });
 
   // Click a vault-node. React Flow registers click handlers on its pane; clicking
   // the node wrapper (or the vault-node div inside it) triggers onNodeClick.
@@ -157,7 +218,7 @@ try {
   const vaultNode = page.locator(".vault-node").first();
   await vaultNode.click();
   await page.waitForSelector('.vault-node[data-focused="true"]', { timeout: 5000 });
-  await page.screenshot({ path: join(OUT, "5-vault-node-focused.png") });
+  await page.screenshot({ path: join(OUT, "6-vault-node-focused.png") });
 
   // Click the same vault-node again — data-focused should clear.
   await vaultNode.click();
@@ -165,14 +226,21 @@ try {
     () => document.querySelectorAll('.vault-node[data-focused="true"]').length === 0,
     { timeout: 5000 },
   );
-  await page.screenshot({ path: join(OUT, "6-vault-node-unfocused.png") });
+  await page.screenshot({ path: join(OUT, "7-vault-node-unfocused.png") });
+
+  // 5) Switch back from Vault to Console tab and assert console view re-renders.
+  await page.click("button:has-text('Console')");
+  // Console view: session-rail + operative rail should be visible again.
+  await page.waitForSelector(".session-rail", { timeout: 5000 });
+  await page.waitForSelector("text=Sessions", { timeout: 5000 });
+  await page.screenshot({ path: join(OUT, "8-back-to-console.png") });
 
   if (errors.length) {
     failed = true;
     console.error(`UI smoke FAILED — ${errors.length} console error(s):`);
     for (const e of errors) console.error("  " + e);
   } else {
-    console.log(`UI smoke PASSED — composer, console, inspector, permission, vault graph all render; 0 console errors. Shots in ${OUT}`);
+    console.log(`UI smoke PASSED — composer, multi-session rail, session focus-switch, console, inspector, permission, vault graph, console tab-return all render; 0 console errors. Shots in ${OUT}`);
   }
 } catch (e) {
   failed = true;

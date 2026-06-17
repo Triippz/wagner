@@ -4,7 +4,8 @@
 CARGO_EDGE_HOST := -p wagner-edge-host
 
 .PHONY: dev cargo clippy e2e ts arch typecheck hub hub-e2e verify accept \
-	edge edge-build edge-ui shell dev-setup docker-hub sync-e2e voice-e2e
+	edge edge-build edge-ui shell dev-setup docker-hub sync-e2e voice-e2e \
+	gui-smoke
 
 # Launch the live MV hub (Deno + Hono): OIDC + ephemeral discovery (long-running).
 dev:
@@ -105,3 +106,12 @@ verify: clippy cargo shell typecheck ts edge-build hub
 # Run `verify` per step (fast); run `accept` at phase boundaries (adds the UI
 # journey, which spawns vite + Playwright and is slower).
 accept: verify edge-ui
+
+# macOS native-window smoke: build the edge bundle, launch the real Tauri shell,
+# then use osascript (AppleScript / System Events) to assert the Wagner window
+# exists on screen and screenshot it. NOT part of `make verify` or `make accept`
+# because it requires a physical/virtual display and Accessibility permission that
+# are unavailable in headless CI. Run manually on a developer workstation.
+# See edge/ui/scripts/native-smoke.sh and docs/development.md §"Native GUI smoke".
+gui-smoke:
+	bash edge/ui/scripts/native-smoke.sh

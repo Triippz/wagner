@@ -196,6 +196,55 @@ wagner/
 
 ---
 
+## Native GUI smoke (macOS)
+
+`make gui-smoke` runs a best-effort native-window check for the assembled Tauri
+desktop shell. It is **not** part of `make verify` or `make accept` — it
+requires a physical or virtual display and macOS Accessibility permission that
+are unavailable in headless CI environments.
+
+### Why not tauri-driver?
+
+[tauri-driver](https://tauri.app/reference/webdriver/) is the official
+WebDriver bridge for Tauri apps; however, its documentation explicitly notes
+that it is **not supported on macOS** because the embedded WKWebView does not
+expose a WebDriver session endpoint (unlike the Chromium-based WebView2 on
+Windows). There is no macOS-compatible Tauri UI testing driver at this time.
+
+### What `make gui-smoke` does
+
+1. Builds the edge UI bundle (`make edge-build`)
+2. Launches the Tauri shell in the background:
+   `cargo run -p wagner-edge-shell --features custom-protocol`
+3. Polls macOS System Events via `osascript` until a window whose title
+   contains "Wagner" is visible (or a 45-second timeout elapses)
+4. Screenshots the display with `screencapture`
+5. Quits the app and cleans up
+
+Screenshots land in `edge/ui/.native-shots/`.
+
+### Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| macOS | Script is Darwin-only; exits immediately on other OSes |
+| Display | A physical monitor or a virtual display server (e.g. Xvfb is not supported on macOS; use a real or VNC display) |
+| Accessibility permission | Grant in **System Settings → Privacy & Security → Accessibility** for the terminal app running `make gui-smoke` |
+
+### Expected failure modes
+
+| Symptom | Likely cause |
+|---------|-------------|
+| `osascript failed — Accessibility permission may not be granted` | Terminal not in the Accessibility allowlist |
+| `Wagner window did not appear within 45s` | No display attached, or cargo/Rust build time exceeded the timeout (first build can be slow — try increasing `LAUNCH_TIMEOUT` in the script) |
+| `screencapture failed` | Terminal not granted Screen Recording permission |
+
+If `make gui-smoke` fails in your environment, the failure is non-fatal for
+development — the headless `make accept` gate (`edge-ui` Playwright journey) is
+the canonical acceptance check.
+
+---
+
 ## Commit conventions
 
 Commit messages follow `type: [scope] description` (enforced by pre-tool hook):
