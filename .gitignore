@@ -19,6 +19,8 @@ deno.lock.tmp
 # IDE
 .idea/
 .vscode/
+# Staged voice sidecar binaries (build artifacts — not source)
+edge/shell/binaries/
 # Local rollback backups (global convention; never committed)
 .backups/
 # Agent worktrees (transient; created by background subagents)

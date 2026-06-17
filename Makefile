@@ -4,7 +4,7 @@
 CARGO_EDGE_HOST := -p wagner-edge-host
 
 .PHONY: dev cargo clippy e2e ts arch typecheck hub hub-e2e verify accept \
-	edge edge-build edge-ui shell dev-setup docker-hub sync-e2e voice-e2e \
+	edge edge-build edge-ui edge-bundle shell dev-setup docker-hub sync-e2e voice-e2e \
 	gui-smoke voice-up voice-down run down
 
 # Launch the live MV hub (Deno + Hono): OIDC + ephemeral discovery (long-running).
@@ -30,6 +30,21 @@ edge-build:
 # transport seam), screenshots each, fails on any console error.
 edge-ui:
 	npm --prefix edge/ui run test:ui
+
+# Produce a distributable Wagner Edge .app containing the voice sidecar binaries.
+# Steps: (1) stage binaries into edge/shell/binaries/ with the host target-triple
+# suffix that Tauri externalBin requires, then (2) invoke cargo tauri build.
+#
+# Prerequisites:
+#   - cargo tauri CLI:  cargo install tauri-cli
+#   - whisper-server:   brew install whisper-cpp  (or set WHISPER_SERVER_BIN=...)
+#   - models are NOT bundled — they download at runtime on first voice-enable.
+#
+# Override the whisper-server path:
+#   make edge-bundle WHISPER_SERVER_BIN=/usr/local/bin/whisper-server
+edge-bundle: edge-build
+	WHISPER_SERVER_BIN="$(WHISPER_SERVER_BIN)" bash scripts/stage-voice-binaries.sh
+	cd edge/shell && cargo tauri build
 
 # Edge desktop shell crate: compile + clippy + the resolve-path unit tests.
 shell:
