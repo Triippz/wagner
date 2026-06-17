@@ -7,6 +7,9 @@ import { OperativeRail } from "./components/OperativeRail";
 import { Inspector } from "./components/Inspector";
 import { TransmissionPrompt } from "./components/TransmissionPrompt";
 import { Composer } from "./components/Composer";
+import { VaultPanel } from "./components/VaultPanel";
+
+type ActiveView = "console" | "vault";
 
 export function App({ surface }: { surface: Surface }) {
   const state = useSyncExternalStore(
@@ -18,6 +21,7 @@ export function App({ surface }: { surface: Surface }) {
   const [composing, setComposing] = useState(false);
   const [answeredIds, setAnsweredIds] = useState<ReadonlySet<string>>(new Set());
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>("console");
 
   const run = state.run;
   const operatives = useMemo(() => Object.values(state.operatives), [state.operatives]);
@@ -55,18 +59,40 @@ export function App({ surface }: { surface: Surface }) {
   return (
     <div className="app">
       <TopBar run={run} needsYou={needsYou} busy={!!busy} onAbort={() => cmd.abort()} onNewRun={newRun} />
-      <div className="console">
-        <OperativeRail operatives={operatives} selectedId={selectedId} onSelect={setSelectedId} />
-        <main className="main">
-          {open && (
-            <TransmissionPrompt
-              transmission={open}
-              pending={pendingAnswer === open.id}
-              onAnswer={onAnswer}
-            />
-          )}
-          <Inspector operative={selected} run={run} />
-        </main>
+      <div className="view-body">
+        <nav className="view-rail">
+          <button
+            className={`view-tab${activeView === "console" ? " active" : ""}`}
+            onClick={() => setActiveView("console")}
+          >
+            Console
+          </button>
+          <button
+            className={`view-tab${activeView === "vault" ? " active" : ""}`}
+            onClick={() => setActiveView("vault")}
+            disabled={needsYou}
+            title={needsYou ? "Answer the pending request first" : undefined}
+          >
+            Vault
+          </button>
+        </nav>
+        {activeView === "vault" ? (
+          <VaultPanel surface={surface} projectDir="" />
+        ) : (
+          <div className="console">
+            <OperativeRail operatives={operatives} selectedId={selectedId} onSelect={setSelectedId} />
+            <main className="main">
+              {open && (
+                <TransmissionPrompt
+                  transmission={open}
+                  pending={pendingAnswer === open.id}
+                  onAnswer={onAnswer}
+                />
+              )}
+              <Inspector operative={selected} run={run} />
+            </main>
+          </div>
+        )}
       </div>
     </div>
   );
