@@ -51,8 +51,9 @@ Authoritative design: `docs/wagner-vision-and-architecture.md`. Kickoff:
 
 Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 
-- [ ] **Phase A — Foundation**: context layer (this file + memory/) + acceptance
-      harness (`make accept`, UI journey in gate) + 003 red acceptance tests.
+- [x] **Phase A — Foundation**: context layer (this file + memory/) ✓ +
+      `make accept` gate (verify + UI journey) ✓ + `specs/003-*/acceptance.md`
+      (Given/When/Then definition of done) ✓.
 - [ ] **Phase 0–2 — Sessions** (`specs/003-durable-concurrent-sessions`): entry
       redesign (folder picker + goal; drop guardrails grid/test field) + durable
       resume + concurrent sessions (RunManager map, run_id-keyed reducer, resume/
@@ -70,15 +71,16 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 
 ## Current position
 
-**Phase A in progress.** Created the durable-context layer (this file +
-`memory/`). Next: commit it, fan out background planning agents (Vault, Voice),
-build the acceptance harness + 003 red tests, then execute `specs/003-*/plan.md`.
+**Phase A done. Executing Plan 003, Step 1** (Run-as-session fields + schema).
+Background sonnet agents are authoring `specs/004-vault-v1/plan.md` and
+`specs/007-voice/plan.md` (independent; land when done).
 
 **Immediate next actions:**
-1. Commit the context layer to `main`.
-2. (bg, sonnet) author `specs/004-vault-v1/plan.md` + `specs/007-voice/plan.md`.
-3. (main) Build `make accept` gate + promote UI journey; write 003 acceptance
-   tests (red); then execute `specs/003-*/plan.md` step by step, commit per step.
+1. 003 Step 1 (TDD): add `project_dir`, `name`, `updated_at`, `goals` to `Run`
+   (`edge/host/src/state/run.rs`) + `edge/host/schemas/run-state.schema.json` +
+   `RunSnapshot` (`edge/ui/store/types.ts`). Red test → green → commit.
+2. Continue 003 steps 2→10 per `specs/003-*/plan.md`, `make verify`+commit each.
+3. At 003 end: `make accept`; then start Plan 004 (Vault) / 007 (Voice).
 
 ## How to resume after a compaction
 

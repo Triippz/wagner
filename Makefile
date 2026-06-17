@@ -3,7 +3,7 @@
 # Cargo runs from repo root so rustup honors rust-toolchain.toml.
 CARGO_EDGE_HOST := -p wagner-edge-host
 
-.PHONY: dev cargo clippy e2e ts arch typecheck hub verify \
+.PHONY: dev cargo clippy e2e ts arch typecheck hub verify accept \
 	edge edge-build edge-ui shell
 
 # Launch the live MV hub (Deno + Hono): OIDC + ephemeral discovery (long-running).
@@ -67,3 +67,12 @@ hub:
 # Full pre-merge gate: clippy → cargo → shell → typecheck → ts →
 # edge-frontend build → hub.
 verify: clippy cargo shell typecheck ts edge-build hub
+
+# Full acceptance gate: the pre-merge `verify` PLUS the headless UI journey.
+# `verify` already covers engine acceptance (unit + integration + gate-e2e via
+# the `cargo`/`shell` targets, which exercise the real run loop behind the
+# `AgentPool` trait with a fake agent), types, frontend build, and hub. `edge-ui`
+# drives the real React console end-to-end through the `?mock` transport seam.
+# Run `verify` per step (fast); run `accept` at phase boundaries (adds the UI
+# journey, which spawns vite + Playwright and is slower).
+accept: verify edge-ui
