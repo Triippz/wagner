@@ -34,7 +34,7 @@ pub struct MemoryInput {
 /// round-trip as plain strings without RecordId (de)serialization friction. Every
 /// field is a plain scalar/array — SurrealDB 2.x's content serializer rejects Rust
 /// enums (`Option`, `serde_json::Value`), so absent sources are stored as `""`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MemoryRecord {
     pub uid: String,
     pub user_id: String,
@@ -48,6 +48,21 @@ pub struct MemoryRecord {
     pub source_type: String,
     #[serde(default)]
     pub source_ref: String,
+    // --- Vault knowledge-model fields (Plan 004). Plain scalars only: SurrealDB
+    // 2.x's content serializer rejects enums/Option/nested objects, so these are
+    // Strings ("" = absent). Typed relationships live in a separate table, not
+    // here. summary powers cheap tiered retrieval (≤200ch by convention).
+    #[serde(default)]
+    pub summary: String,
+    /// core | supporting | peripheral (or "").
+    #[serde(default)]
+    pub tier: String,
+    /// draft | reviewed | verified | disputed | archived (or "").
+    #[serde(default)]
+    pub lifecycle: String,
+    /// extracted | inferred | ambiguous (or "").
+    #[serde(default)]
+    pub provenance: String,
 }
 
 /// A persisted workflow template (decision #4 — workflows are reusable). `content`
@@ -91,13 +106,27 @@ pub fn memory_markdown(rec: &MemoryRecord) -> String {
     // in a project path or tag can't malform the YAML block (the body is free text).
     let q = |s: &str| format!("\"{}\"", s.replace(['\n', '\r'], " ").replace('"', "'"));
     let tags = rec.tags.iter().map(|t| q(t)).collect::<Vec<_>>().join(", ");
+    // Vault fields are emitted only when set, so legacy notes keep their exact
+    // shape and the frontmatter stays minimal until semantic extraction fills it.
+    let mut extra = String::new();
+    for (key, val) in [
+        ("summary", &rec.summary),
+        ("tier", &rec.tier),
+        ("lifecycle", &rec.lifecycle),
+        ("provenance", &rec.provenance),
+    ] {
+        if !val.is_empty() {
+            extra.push_str(&format!("{key}: {}\n", q(val)));
+        }
+    }
     format!(
-        "---\nuid: {uid}\nproject: {project}\ntags: [{tags}]\ncreated: {created}\ncuration: {curation}\n---\n\n{text}\n",
+        "---\nuid: {uid}\nproject: {project}\ntags: [{tags}]\ncreated: {created}\ncuration: {curation}\n{extra}---\n\n{text}\n",
         uid = q(&rec.uid),
         project = q(&rec.project_id),
         tags = tags,
         created = q(&rec.created_at),
         curation = q(&rec.curation_state),
+        extra = extra,
         text = rec.text,
     )
 }
@@ -149,6 +178,7 @@ impl MemoryStore {
             curation_state: "auto".into(),
             source_type: input.source_type.unwrap_or_default(),
             source_ref: input.source_ref.unwrap_or_default(),
+            ..Default::default()
         };
         // CREATE with a known id. Deserialize the response into `MemoryRecord` (which
         // omits the Surreal `id`) — a `serde_json::Value` would choke on the RecordId.
@@ -278,12 +308,44 @@ mod tests {
             curation_state: "auto".into(),
             source_type: String::new(),
             source_ref: String::new(),
+            ..Default::default()
         };
         let md = memory_markdown(&rec);
         assert!(md.starts_with("---\n"));
         assert!(md.contains("tags: [\"style\", \"rust\"]"));
         assert!(md.contains("project: \"proj\""));
         assert!(md.trim_end().ends_with("prefer struct params"));
+    }
+
+    #[test]
+    fn markdown_emits_vault_fields_when_set_and_omits_when_empty() {
+        // Vault frontmatter (Plan 004): present only when populated, so legacy
+        // notes keep their minimal shape.
+        let mut rec = MemoryRecord {
+            uid: "u".into(),
+            user_id: "me".into(),
+            project_id: "proj".into(),
+            text: "body".into(),
+            created_at: "2026-06-17T00:00:00Z".into(),
+            curation_state: "captured".into(),
+            ..Default::default()
+        };
+        // Empty by default → no vault keys in the block.
+        let bare = memory_markdown(&rec);
+        assert!(!bare.contains("summary:"));
+        assert!(!bare.contains("tier:"));
+
+        rec.summary = "prefers struct params over many args".into();
+        rec.tier = "core".into();
+        rec.lifecycle = "reviewed".into();
+        rec.provenance = "extracted".into();
+        let md = memory_markdown(&rec);
+        assert!(md.contains("summary: \"prefers struct params over many args\""));
+        assert!(md.contains("tier: \"core\""));
+        assert!(md.contains("lifecycle: \"reviewed\""));
+        assert!(md.contains("provenance: \"extracted\""));
+        // Still exactly one frontmatter close.
+        assert_eq!(md.matches("\n---\n").count(), 1);
     }
 
     #[test]
@@ -298,6 +360,7 @@ mod tests {
             curation_state: "auto".into(),
             source_type: String::new(),
             source_ref: String::new(),
+            ..Default::default()
         };
         let md = memory_markdown(&rec);
         // exactly one frontmatter close before the body — no injected second doc.
