@@ -120,12 +120,59 @@ try {
   await page.waitForTimeout(450);
   await page.screenshot({ path: join(OUT, "3-permission.png") });
 
+  // 4) Vault graph smoke — dismiss the open transmission first so the Vault tab is enabled.
+  await page.evaluate(() => {
+    // Simulate answering the transmission so needsYou clears (mock: no real IPC, so
+    // we push an updated transmission with state=closed to close the prompt).
+    window.__wagner.push("transmission", {
+      schema: "transmission.v1", id: "t1", subtask_id: "s2", kind: "permission",
+      prompt: "Allow Vex to run `git push origin feat/healthz`?",
+      options: [{ id: "allow", label: "Approve" }, { id: "deny", label: "Deny" }],
+      raised_at: new Date().toISOString(), state: "closed",
+    });
+  });
+
+  // Click Vault tab first so VaultPanel mounts and registers its .on() listener.
+  await page.click("button:has-text('Vault'):not([disabled])");
+  // Wait for the loading state to confirm VaultPanel has mounted.
+  await page.waitForSelector("text=Loading vault", { timeout: 5000 });
+
+  // Now push mock vault graph data — VaultPanel's side-channel listener is live.
+  await page.evaluate(() => {
+    window.__wagner.push("vault_graph_result", {
+      nodes: [
+        { uid: "n1", title: "Alpha Node", tier: "core", lifecycle: "active" },
+        { uid: "n2", title: "Beta Node", tier: "supporting", lifecycle: "draft" },
+      ],
+      edges: [{ sourceUid: "n1", targetUid: "n2", relType: "references" }],
+    });
+  });
+
+  await page.waitForSelector(".vault-node", { timeout: 8000 });
+  await page.screenshot({ path: join(OUT, "4-vault-graph.png") });
+
+  // Click a vault-node. React Flow registers click handlers on its pane; clicking
+  // the node wrapper (or the vault-node div inside it) triggers onNodeClick.
+  // We use the vault-node div directly — its own onClick handler also fires toggleFocus.
+  const vaultNode = page.locator(".vault-node").first();
+  await vaultNode.click();
+  await page.waitForSelector('.vault-node[data-focused="true"]', { timeout: 5000 });
+  await page.screenshot({ path: join(OUT, "5-vault-node-focused.png") });
+
+  // Click the same vault-node again — data-focused should clear.
+  await vaultNode.click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('.vault-node[data-focused="true"]').length === 0,
+    { timeout: 5000 },
+  );
+  await page.screenshot({ path: join(OUT, "6-vault-node-unfocused.png") });
+
   if (errors.length) {
     failed = true;
     console.error(`UI smoke FAILED — ${errors.length} console error(s):`);
     for (const e of errors) console.error("  " + e);
   } else {
-    console.log(`UI smoke PASSED — composer, console, inspector, permission all render; 0 console errors. Shots in ${OUT}`);
+    console.log(`UI smoke PASSED — composer, console, inspector, permission, vault graph all render; 0 console errors. Shots in ${OUT}`);
   }
 } catch (e) {
   failed = true;

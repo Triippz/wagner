@@ -11,11 +11,29 @@ import "./styles.css";
 // the Tauri bridge, so the browser UI is testable headlessly (no native shell).
 // `window.__wagner.push(channel, payload)` feeds the same surface the real
 // transport would. DEV-only and query-gated — never reaches a production bundle.
+// Side-channel listeners (e.g. VaultPanel) subscribe via `window.__wagner.on`.
+type WagnerMockHandle = {
+  push: (channel: string, payload: unknown) => void;
+  on: (channel: string, cb: (payload: unknown) => void) => () => void;
+};
+
 function makeMockTransport(): EventStreamTransport {
   let sink: ((e: TransportEvent) => void) | null = null;
-  (window as unknown as { __wagner: unknown }).__wagner = {
-    push: (channel: string, payload: unknown) => sink?.({ channel, payload }),
+  const sideListeners = new Map<string, Set<(p: unknown) => void>>();
+  const handle: WagnerMockHandle = {
+    push: (channel: string, payload: unknown) => {
+      // Feed the surface subscriber (known channels: event/run/transmission).
+      sink?.({ channel, payload });
+      // Also route to side-channel listeners (e.g. vault_graph_result).
+      sideListeners.get(channel)?.forEach((cb) => cb(payload));
+    },
+    on: (channel: string, cb: (payload: unknown) => void) => {
+      if (!sideListeners.has(channel)) sideListeners.set(channel, new Set());
+      sideListeners.get(channel)!.add(cb);
+      return () => sideListeners.get(channel)?.delete(cb);
+    },
   };
+  (window as unknown as { __wagner: WagnerMockHandle }).__wagner = handle;
   return {
     subscribe(onEvent) {
       sink = onEvent;

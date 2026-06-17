@@ -65,6 +65,24 @@ export interface StartRunInput {
   guardrails?: GuardrailInput;
 }
 
+export interface VaultNodeDto {
+  uid: string;
+  title: string;
+  tier: string;
+  lifecycle: string;
+}
+
+export interface VaultEdgeDto {
+  sourceUid: string;
+  targetUid: string;
+  relType: string;
+}
+
+export interface VaultGraphDto {
+  nodes: VaultNodeDto[];
+  edges: VaultEdgeDto[];
+}
+
 export const cmd = {
   preflight: () => invoke<CliStatus>("preflight"),
   agentCatalog: (projectDir: string) =>
@@ -101,4 +119,6 @@ export const cmd = {
     invoke<string[]>("list_staging", { projectDir }),
   answerTransmission: (id: string, response: string) =>
     invoke<void>("answer_transmission", { id, response }),
+  vaultGraph: (projectDir: string) =>
+    invoke<VaultGraphDto>("vault_graph", { projectDir }),
 };

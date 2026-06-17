@@ -24,6 +24,52 @@ use wagner_edge_host::schema::WORKFLOW_STEP_EVENT_SCHEMA;
 /// no iteration cap (fix-loops are additionally bounded by their per-edge caps).
 const DEFAULT_MAX_WORKFLOW_STEPS: usize = 200;
 
+// ── Vault graph DTOs ────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultNodeDto {
+    pub uid: String,
+    pub title: String,
+    pub tier: String,
+    pub lifecycle: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultEdgeDto {
+    pub source_uid: String,
+    pub target_uid: String,
+    pub rel_type: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct VaultGraphDto {
+    pub nodes: Vec<VaultNodeDto>,
+    pub edges: Vec<VaultEdgeDto>,
+}
+
+/// Return the vault knowledge graph for the selected project.
+#[tauri::command]
+pub async fn vault_graph(
+    store: State<'_, MemoryStore>,
+    project_dir: String,
+) -> Result<VaultGraphDto, String> {
+    let graph = store.vault_graph(&project_dir).await.map_err(|e| e.to_string())?;
+    Ok(VaultGraphDto {
+        nodes: graph
+            .nodes
+            .into_iter()
+            .map(|n| VaultNodeDto { uid: n.uid, title: n.title, tier: n.tier, lifecycle: n.lifecycle })
+            .collect(),
+        edges: graph
+            .edges
+            .into_iter()
+            .map(|e| VaultEdgeDto { source_uid: e.source_uid, target_uid: e.target_uid, rel_type: e.rel_type })
+            .collect(),
+    })
+}
+
 /// Per-run control handles held in Tauri-managed state — one live entry per run
 /// id, so multiple sessions run concurrently (a `start_run` no longer replaces a
 /// prior one). Finished runs' entries linger until app exit (a completed

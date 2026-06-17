@@ -470,3 +470,51 @@ button {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---- View body (rail + content, fills the grid 1fr row) ---------------- */
+.view-body {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+
+/* ---- View rail (Console / Vault tab strip) ------------------------------ */
+.view-rail {
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px 12px; background: var(--surface); border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.view-tab {
+  padding: 3px 14px; border-radius: var(--r-sm); border: none;
+  background: transparent; color: var(--ink-dim); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.view-tab:hover { background: var(--surface-2); color: var(--ink); }
+.view-tab.active { background: var(--accent-bg); color: var(--accent); }
+.view-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---- Vault panel -------------------------------------------------------- */
+.vault-panel {
+  flex: 1; overflow: hidden; display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.vault-panel-loading, .vault-panel-error {
+  padding: 24px; color: var(--ink-dim); font-size: 13px;
+}
+.vault-panel-error { color: var(--alert); }
+
+/* ---- Vault node cards -------------------------------------------------- */
+.vault-node {
+  padding: 8px 12px; border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); font-size: 12px;
+  min-width: 120px; text-align: center; cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.vault-node:hover { border-color: var(--accent); }
+.vault-node[data-focused="true"] {
+  border-color: var(--accent-strong); box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+/* Tier-color accent on left border */
+.vault-node[data-tier="core"]        { border-left: 3px solid var(--accent); }
+.vault-node[data-tier="supporting"]  { border-left: 3px solid var(--architects); }
+.vault-node[data-tier="peripheral"]  { border-left: 3px solid var(--forgers); }

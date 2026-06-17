@@ -8,6 +8,9 @@ import { SessionRail } from "./components/SessionRail";
 import { Inspector } from "./components/Inspector";
 import { TransmissionPrompt } from "./components/TransmissionPrompt";
 import { Composer } from "./components/Composer";
+import { VaultPanel } from "./components/VaultPanel";
+
+type ActiveView = "console" | "vault";
 
 export function App({ surface }: { surface: Surface }) {
   const state = useSyncExternalStore(
@@ -20,6 +23,7 @@ export function App({ surface }: { surface: Surface }) {
   const [answeredIds, setAnsweredIds] = useState<ReadonlySet<string>>(new Set());
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<RunSummary[]>([]);
+  const [activeView, setActiveView] = useState<ActiveView>("console");
 
   // Load persisted sessions on boot so the rail isn't empty before live events
   // (best-effort: in a non-Tauri/mock browser this invoke rejects → no summaries).
@@ -83,24 +87,46 @@ export function App({ surface }: { surface: Surface }) {
   return (
     <div className="app">
       <TopBar run={run} needsYou={needsYou} busy={!!busy} onAbort={() => cmd.abort()} onNewRun={newRun} />
-      <div className="console">
-        <SessionRail
-          sessions={sessions}
-          selectedRunId={state.selectedRunId}
-          onSelect={onSelectSession}
-          onNewSession={newRun}
-        />
-        <OperativeRail operatives={operatives} selectedId={selectedId} onSelect={setSelectedId} />
-        <main className="main">
-          {open && (
-            <TransmissionPrompt
-              transmission={open}
-              pending={pendingAnswer === open.id}
-              onAnswer={onAnswer}
+      <div className="view-body">
+        <nav className="view-rail">
+          <button
+            className={`view-tab${activeView === "console" ? " active" : ""}`}
+            onClick={() => setActiveView("console")}
+          >
+            Console
+          </button>
+          <button
+            className={`view-tab${activeView === "vault" ? " active" : ""}`}
+            onClick={() => setActiveView("vault")}
+            disabled={needsYou}
+            title={needsYou ? "Answer the pending request first" : undefined}
+          >
+            Vault
+          </button>
+        </nav>
+        {activeView === "vault" ? (
+          <VaultPanel surface={surface} projectDir="" />
+        ) : (
+          <div className="console">
+            <SessionRail
+              sessions={sessions}
+              selectedRunId={state.selectedRunId}
+              onSelect={onSelectSession}
+              onNewSession={newRun}
             />
-          )}
-          <Inspector operative={selected} run={run} />
-        </main>
+            <OperativeRail operatives={operatives} selectedId={selectedId} onSelect={setSelectedId} />
+            <main className="main">
+              {open && (
+                <TransmissionPrompt
+                  transmission={open}
+                  pending={pendingAnswer === open.id}
+                  onAnswer={onAnswer}
+                />
+              )}
+              <Inspector operative={selected} run={run} />
+            </main>
+          </div>
+        )}
       </div>
     </div>
   );
