@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  activeRun,
   applyEvent,
   applyRun,
   applyTransmission,
@@ -189,7 +190,20 @@ describe("run + transmissions", () => {
 
   it("stores the run snapshot for the HUD", () => {
     const s = applyRun(initialState, run);
-    expect(s.run?.iteration).toBe(2);
+    expect(activeRun(s)?.iteration).toBe(2);
+  });
+
+  it("keeps concurrent sessions independent, keyed by run id", () => {
+    // Two sessions with different ids coexist; updating one never clobbers the
+    // other; the first to arrive auto-focuses (acceptance U1, U2).
+    const a = applyRun(initialState, { ...run, run_id: "rA", iteration: 1 });
+    const ab = applyRun(a, { ...run, run_id: "rB", iteration: 9 });
+    expect(Object.keys(ab.runs).sort()).toEqual(["rA", "rB"]);
+    expect(ab.runs.rA!.iteration).toBe(1);
+    expect(ab.runs.rB!.iteration).toBe(9);
+    // First session (rA) auto-focused, so activeRun follows it.
+    expect(ab.selectedRunId).toBe("rA");
+    expect(activeRun(ab)?.run_id).toBe("rA");
   });
 
   it("stores the run phase and subtasks for the mission bar + inspector", () => {
@@ -206,8 +220,8 @@ describe("run + transmissions", () => {
         },
       ],
     });
-    expect(s.run?.phase).toBe("dispatching");
-    expect(s.run?.subtasks?.[0]!.agent_id).toBe("cipher");
+    expect(activeRun(s)?.phase).toBe("dispatching");
+    expect(activeRun(s)?.subtasks?.[0]!.agent_id).toBe("cipher");
   });
 
   it("opens and dedups transmissions by id", () => {

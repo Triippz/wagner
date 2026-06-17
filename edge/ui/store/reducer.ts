@@ -10,7 +10,10 @@ import type {
 import { validateUiSpec, type UiSpec } from "./uiSpec";
 
 export interface WagnerState {
-  run: RunSnapshot | null;
+  /** Every live/known session, keyed by run id (concurrent sessions). */
+  runs: Record<string, RunSnapshot>;
+  /** The session the console is focused on (the rail's selection). */
+  selectedRunId: string | null;
   operatives: Record<string, Operative>;
   transmissions: Transmission[];
   /** The operative the inspector is open on, if any. */
@@ -20,7 +23,8 @@ export interface WagnerState {
 }
 
 export const initialState: WagnerState = {
-  run: null,
+  runs: {},
+  selectedRunId: null,
   operatives: {},
   transmissions: [],
   selectedOperativeId: null,
@@ -122,12 +126,35 @@ export function applyPanel(
   return { ...state, panels: { ...state.panels, [operativeId]: spec } };
 }
 
-/** Replace the run snapshot (HUD: status, iteration, cost). */
+/** Fold a run snapshot into the session map, keyed by its run id (concurrent
+ *  sessions). The first session to arrive auto-focuses so the console isn't blank
+ *  before the rail makes a selection. */
 export function applyRun(
   state: WagnerState,
   run: RunSnapshot
 ): WagnerState {
-  return { ...state, run };
+  const runs = { ...state.runs, [run.run_id]: run };
+  const selectedRunId = state.selectedRunId ?? run.run_id;
+  return { ...state, runs, selectedRunId };
+}
+
+/** The focused session (what TopBar/Inspector render), or null if none. */
+export function activeRun(state: WagnerState): RunSnapshot | null {
+  if (state.selectedRunId == null) return null;
+  return state.runs[state.selectedRunId] ?? null;
+}
+
+/** All sessions for the rail, newest-first by updated_at (created order falls
+ *  back to insertion when timestamps are absent/equal). */
+export function runList(state: WagnerState): RunSnapshot[] {
+  return Object.values(state.runs).sort((a, b) =>
+    (b.updated_at ?? "").localeCompare(a.updated_at ?? "")
+  );
+}
+
+/** Focus a session by id (the rail's click). */
+export function selectRun(state: WagnerState, runId: string): WagnerState {
+  return { ...state, selectedRunId: runId };
 }
 
 /** Open or update a transmission (dedup by id; newest fields win). */

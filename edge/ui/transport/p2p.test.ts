@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { createP2pTransport, type P2pChannel } from "./p2p";
 import { createSurface } from "../surfaces/surface";
+import { activeRun } from "../store/reducer";
 
 function loopbackChannel() {
   let handler: ((f: unknown) => void) | null = null;
@@ -26,13 +27,13 @@ describe("P2P adapter", () => {
   it("delivers channel frames to the surface and folds them", () => {
     const lb = loopbackChannel();
     const surface = createSurface(createP2pTransport(lb.channel));
-    lb.deliver({ channel: "run", payload: { goal: "remote run" } });
-    expect(surface.getState().run?.goal).toBe("remote run");
+    lb.deliver({ channel: "run", payload: { run_id: "r1", goal: "remote run" } });
+    expect(activeRun(surface.getState())?.goal).toBe("remote run");
   });
 
   it("a remote attach folds the SAME projection a local one would", () => {
     const frames = [
-      { channel: "run", payload: { goal: "g" } },
+      { channel: "run", payload: { run_id: "rg", goal: "g" } },
       { channel: "event", payload: { schema: "wagner-event.v1", event_id: "e", run_id: "r", operative_id: "cipher", operative_name: "Cipher", faction: "architects", activity: "edit", district: "stacks", state: "working", ts: "2026-06-16T00:00:00Z" } },
     ];
     // Drive the same frames over two independent channels → identical state.

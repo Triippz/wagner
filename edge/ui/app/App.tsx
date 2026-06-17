@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import type { Surface } from "../surfaces/surface";
-import { openTransmission } from "../store/reducer";
+import { activeRun, openTransmission } from "../store/reducer";
 import { cmd } from "./bridge";
 import { TopBar } from "./components/TopBar";
 import { OperativeRail } from "./components/OperativeRail";
@@ -19,7 +19,7 @@ export function App({ surface }: { surface: Surface }) {
   const [answeredIds, setAnsweredIds] = useState<ReadonlySet<string>>(new Set());
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
 
-  const run = state.run;
+  const run = activeRun(state);
   const operatives = useMemo(() => Object.values(state.operatives), [state.operatives]);
   const rawOpen = openTransmission(state);
   const open = rawOpen && !answeredIds.has(rawOpen.id) ? rawOpen : null;

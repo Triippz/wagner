@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { EventStreamTransport, TransportEvent } from "@wagner/shared/transport";
 import { createSurface, type SurfaceMessage } from "./surface";
+import { activeRun } from "../store/reducer";
 
 /** A fake transport that replays a fixed message list on subscribe. */
 function fakeTransport(messages: SurfaceMessage[]): EventStreamTransport {
@@ -27,7 +28,7 @@ const MESSAGES: SurfaceMessage[] = [
   {
     channel: "run",
     payload: {
-      runId: "r1",
+      run_id: "r1",
       goal: "build the thing",
       status: "running",
       phase: "dispatching",
@@ -64,7 +65,7 @@ describe("unified surface folds identically across transports (FR-001/002)", () 
   it("renders the run + the operative from the folded stream", () => {
     const surface = createSurface(fakeTransport(MESSAGES));
     const state = surface.getState();
-    expect(state.run?.goal).toBe("build the thing");
+    expect(activeRun(state)?.goal).toBe("build the thing");
     expect(state.operatives.cipher?.name).toBe("Cipher");
     expect(state.operatives.cipher?.bubble).toBe("editing main.rs");
   });
