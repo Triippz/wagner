@@ -22,11 +22,14 @@ INTEGRATED ✓: `lane/voice` (Voice pillar), `lane/devex` (Docker + hub E2E + do
 IN FLIGHT (integrate when they report green — `git merge lane/<name>` then
 `make verify`/`make accept`):
 - `lane/graph` — Phase 4 Graph view + Vault browser (vault_graph IPC + React Flow
-  `@xyflow/react` + VaultGraph/VaultBrowser components + staging approval UI +
-  specs/005-graph-view/plan.md). Touches edge/host/src/memory.rs,
-  edge/shell/src/commands.rs+lib.rs, edge/ui/**. DO NOT edit those until merged.
-- (planning agent) authoring `specs/006-sync/plan.md` + `specs/008-hub-vault/plan.md`
-  (no code). When done, build Sync (006) in the main loop — highest-risk; then Hub (008).
+  `@xyflow/react` + VaultGraph/VaultBrowser + staging approval UI + specs/005).
+  Touches edge/host/src/memory.rs, edge/shell/src/commands.rs+lib.rs, edge/ui/**.
+- `lane/sync` — Phase 5 distributed sync (loro+iroh+projector) per specs/006-sync
+  (opus). NEW module (sync/crdt) + Cargo deps + lib.rs. Highest risk.
+- Sync/Hub plans authored ✓ (`specs/006-sync/plan.md`, `specs/008-hub-vault/plan.md`).
+- INTEGRATION ORDER when they report: merge `lane/graph` first, then `lane/sync`
+  (resolve lib.rs invoke_handler + Cargo.toml overlaps — both additive). Then
+  build Hub (008) — depends on sync traits. Then broaden the E2E journey.
 
 Wagner = a distributed engineering platform: run autonomous coding agents and
 accumulate what they learn into a shared, living knowledge base. **Edge executes,
