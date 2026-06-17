@@ -143,6 +143,16 @@ pub fn derive_title(text: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Path to a note's Markdown projection. `staging = true` targets the
+/// `.wagner/memory/_staging/` approval gate; false targets the curated dir.
+fn note_md_path(project_dir: &std::path::Path, uid: &str, staging: bool) -> std::path::PathBuf {
+    let mut p = project_dir.join(".wagner").join("memory");
+    if staging {
+        p = p.join("_staging");
+    }
+    p.join(format!("{uid}.md"))
+}
+
 /// Stable id from a name (template ids, memory slugs).
 pub fn slug(name: &str) -> String {
     let s: String = name
@@ -304,8 +314,55 @@ impl MemoryStore {
         }
         self.write_backlinks(&uid, &targets).await?;
         self.write_relationships(&uid, &meta.relationships).await?;
-        self.write_markdown_projection(project_dir, &rec);
+        // Agent-authored notes land in the _staging/ gate until a human approves
+        // them (Plan 004 step 6) — keeps the curated vault trustworthy.
+        let staged = note_md_path(project_dir, &uid, true);
+        if let Some(parent) = staged.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&staged, memory_markdown(&rec));
         Ok(rec)
+    }
+
+    /// Approve a staged note: move its Markdown from `_staging/` to the curated
+    /// dir and flip its curation state to `captured`. Errors if the uid isn't
+    /// staged. ponytail: single-note approval only; batch approve/reject later.
+    pub async fn approve_staging_note(
+        &self,
+        uid: &str,
+        project_dir: &Path,
+    ) -> Result<(), StoreError> {
+        let from = note_md_path(project_dir, uid, true);
+        if !from.exists() {
+            return Err(StoreError::InvalidInput(format!("no staged note {uid}")));
+        }
+        let to = note_md_path(project_dir, uid, false);
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| StoreError::InvalidInput(e.to_string()))?;
+        }
+        std::fs::rename(&from, &to).map_err(|e| StoreError::InvalidInput(e.to_string()))?;
+        self.db
+            .query("UPDATE type::thing('memory', $u) SET curation_state = 'captured'")
+            .bind(("u", uid.to_string()))
+            .await?
+            .check()?;
+        Ok(())
+    }
+
+    /// The uids of notes currently awaiting approval in `_staging/`.
+    pub fn list_staging(&self, project_dir: &Path) -> Vec<String> {
+        let dir = project_dir.join(".wagner").join("memory").join("_staging");
+        let mut out = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                if e.path().extension().and_then(|x| x.to_str()) == Some("md") {
+                    if let Some(stem) = e.path().file_stem().and_then(|s| s.to_str()) {
+                        out.push(stem.to_string());
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Recall the most recent learnings for a project (newest first). `tag`, when
@@ -817,12 +874,43 @@ mod tests {
             .unwrap();
         let rows: Vec<Row> = res.take(0).unwrap();
         assert_eq!(rows.len(), 1);
-        // Markdown projected with vault scalars.
-        let md_path = dir.path().join(".wagner").join("memory").join(format!("{}.md", rec.uid));
+        // Markdown projected (to the _staging gate) with vault scalars.
+        let md_path = dir
+            .path()
+            .join(".wagner")
+            .join("memory")
+            .join("_staging")
+            .join(format!("{}.md", rec.uid));
         assert!(md_path.exists());
         let md = std::fs::read_to_string(&md_path).unwrap();
         assert!(md.contains("summary: \"a short note\""));
         assert!(md.contains("tier: \"core\""));
+    }
+
+    #[tokio::test]
+    async fn staging_gate_holds_then_approve_promotes() {
+        let (store, dir) = temp_store().await;
+        let rec = store
+            .save_note(note_input("p", "# Note\nbody"), NoteMeta::default(), "2026-06-17T00:00:00Z", dir.path())
+            .await
+            .unwrap();
+        let staged = dir.path().join(".wagner/memory/_staging").join(format!("{}.md", rec.uid));
+        let curated = dir.path().join(".wagner/memory").join(format!("{}.md", rec.uid));
+        // Lands in staging, not curated.
+        assert!(staged.exists());
+        assert!(!curated.exists());
+        assert_eq!(store.list_staging(dir.path()), vec![rec.uid.clone()]);
+        // Approve → moves to curated, leaves staging.
+        store.approve_staging_note(&rec.uid, dir.path()).await.unwrap();
+        assert!(!staged.exists());
+        assert!(curated.exists());
+        assert!(store.list_staging(dir.path()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn approve_unknown_staged_note_errors() {
+        let (store, dir) = temp_store().await;
+        assert!(store.approve_staging_note("01NOPE", dir.path()).await.is_err());
     }
 
     #[tokio::test]
