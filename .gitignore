@@ -14,3 +14,7 @@ edge/ui/.ui-shots/
 .wagner/
 # Deno
 deno.lock.tmp
+# OS
+.DS_Store
+# Logs
+*.log
