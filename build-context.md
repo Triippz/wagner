@@ -54,10 +54,10 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 - [x] **Phase A — Foundation**: context layer (this file + memory/) ✓ +
       `make accept` gate (verify + UI journey) ✓ + `specs/003-*/acceptance.md`
       (Given/When/Then definition of done) ✓.
-- [ ] **Phase 0–2 — Sessions** (`specs/003-durable-concurrent-sessions`): entry
-      redesign (folder picker + goal; drop guardrails grid/test field) + durable
-      resume + concurrent sessions (RunManager map, run_id-keyed reducer, resume/
-      list/get/add_goal IPC, Run-as-session fields). **← current critical path.**
+- [x] **Phase 0–2 — Sessions** (`specs/003-durable-concurrent-sessions`): DONE.
+      All 10 steps committed; `make accept` green. Entry redesign (folder picker
+      + goal), Run-as-session fields, RunManager map, run_id-keyed reducer +
+      selectors, resume/list/get/add_goal IPC, ipc.ts fix, session rail.
 - [ ] **Phase 3 — Vault v1** (`specs/004-vault-v1`): wikilinks + typed
       relationships + backlinks over `.wagner/memory`, deterministic linker.
       Extends `edge/host/src/memory.rs`. Parallel-capable.
@@ -71,24 +71,21 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 
 ## Current position
 
-**Phase A done. Plan 003 in progress — Steps 1 & 2 committed.** Plans 004
-(Vault) + 007 (Voice) authored + committed (ready for their own build later).
+**Plan 003 (Sessions, Phases 0–2) COMPLETE** — 10 steps committed on
+`feat/autonomous-build`, `make accept` green. Foundation (Phase A) + Plans 004
+(Vault) & 007 (Voice) authored.
 
-Done so far (commits on `feat/autonomous-build`):
-- ✅ Step 1: Run carries session fields (project_dir/name/updated_at/goals) +
-  schema (optional) + RunSnapshot. `af9d9d5`.
-- ✅ Step 2: RunManager Option→HashMap (concurrent sessions); insert not replace;
-  abort/steer take optional run_id; `abort_targets` helper + test. `make verify`✓.
+**Next: Plan 004 — Vault v1** (`specs/004-vault-v1/plan.md`), engine-side,
+extends `edge/host/src/memory.rs`. TDD steps 1→8. Then Plan 005 (Graph, needs
+React Flow), Plan 006 (Sync, hard), Plan 007 (Voice, parallel).
 
-**Immediate next actions:**
-1. Step 3 (TDD): `list_runs` + `get_run` IPC. `store::list_summaries(runs_root)`
-   reading `{app_data}/runs/*/state.json` → `RunSummary` newest-first (skip
-   corrupt dirs); shell commands + register in invoke_handler; bridge helpers.
-2. Step 4: `resume_run` (load → rebuild pool/gate → re-enter loop via a shared
-   `spawn_run_loop` helper extracted from start_run).
-3. Step 5: `add_goal`. Step 6: ipc.ts command-name fix + optional guardrails.
-   Steps 7–10: reducer runs map + selectors, consumers, Composer, SessionRail.
-4. At 003 end: `make accept`; then build Plan 004 / 007.
+**Resume protocol:** `git log --oneline -20` shows every committed step. Each 003
+step is one commit (`feat: [sessions] 003 step N`). Re-run `make verify` to
+confirm green, then start Plan 004 Step 1 (NoteMetadata frontmatter upgrade).
+
+Commit history (003): step1 `af9d9d5`, step2 `3ae100b`, step3 `6b7a106`,
+step4 `5e3880c`, step5 `61356b9`, step6 `5066d98`, steps7-8 `f14d6f5`,
+step9 `76ee180`, step10 `0164ce7`.
 
 ## How to resume after a compaction
 
