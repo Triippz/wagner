@@ -13,5 +13,5 @@ pub mod snapshot_store;
 pub mod sync_adapter;
 
 pub use linker::{parse_wikilinks, WikiLink};
-pub use sync_adapter::GossipSyncAdapter;
+pub use sync_adapter::{GossipSyncAdapter, vault_relay_mode};
 pub use snapshot_store::IrohDocsStore;

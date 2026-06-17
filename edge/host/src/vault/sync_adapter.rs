@@ -4,10 +4,41 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use iroh::RelayMode;
 use iroh_gossip::{api::GossipSender, net::Gossip, proto::TopicId};
 use thiserror::Error;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// Relay configuration seam
+// ---------------------------------------------------------------------------
+
+/// Returns the relay mode used when building iroh `Endpoint`s for vault gossip sync.
+///
+/// Currently: `RelayMode::Default` — the n0-hosted production relay infrastructure.
+/// Swap this to `RelayMode::Custom(our_relay_map)` once we operate our own relay.
+///
+/// n0 relays for now; swap to our own relay URLs later.
+///
+/// # Example
+/// ```no_run
+/// use iroh::{Endpoint, endpoint::presets};
+/// use wagner_edge_host::vault::sync_adapter::vault_relay_mode;
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let ep = Endpoint::builder(presets::N0)
+///     .relay_mode(vault_relay_mode())
+///     .bind()
+///     .await
+///     .expect("bind");
+/// # }
+/// ```
+pub fn vault_relay_mode() -> RelayMode {
+    // n0 relays for now; swap to our own relay URLs later (one-line change here).
+    RelayMode::Default
+}
 
 const BROADCAST_CAPACITY: usize = 256;
 
@@ -100,6 +131,10 @@ type TopicSenders = Mutex<HashMap<Uuid, GossipSender>>;
 /// `broadcast_delta` broadcasts the delta bytes to all peers in the topic.
 /// `pending_deltas` is not supported for the live adapter — use a dedicated
 /// receiver task instead (see the integration test for the subscribe_and_join pattern).
+///
+/// The iroh `Endpoint` backing the `Gossip` handle should be built with
+/// [`vault_relay_mode()`] so it uses the n0 relay infrastructure (default) or
+/// our own relay once we operate one.
 ///
 /// ponytail: pending_deltas returns empty for live adapter — callers should use
 /// the gossip receiver stream directly for production ingest.

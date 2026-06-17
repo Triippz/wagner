@@ -143,3 +143,8 @@ path = "tests/unit/wikilink_rename.rs"
 [[test]]
 name = "vault_sync_live"
 path = "tests/integration/vault_sync_live.rs"
+
+# n0 relay E2E — two real iroh Endpoints over n0 public relays; ignored by default
+[[test]]
+name = "vault_sync_n0_e2e"
+path = "tests/vault_sync_n0_e2e.rs"
