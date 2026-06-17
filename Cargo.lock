@@ -9829,6 +9829,7 @@ name = "wagner-edge-host"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chrono",
  "futures",
  "iroh",

@@ -7,7 +7,7 @@
 >
 > (Not to be confused with `CONTEXT.md` — that's the domain glossary.)
 
-Last updated: 2026-06-17 (post-sync integration; Phase 6 Hub next)
+Last updated: 2026-06-17 (Phase 6 hub vault steps 1-6 done; step 7 live iroh remains)
 
 ## Mission
 

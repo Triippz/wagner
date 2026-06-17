@@ -1,8 +1,10 @@
-//! SyncAdapter trait and in-memory implementation.
+//! SyncAdapter trait, in-memory implementation, and iroh-gossip live adapter.
 
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use iroh_gossip::{api::GossipSender, net::Gossip, proto::TopicId};
 use thiserror::Error;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
@@ -82,5 +84,79 @@ impl SyncAdapter for InMemorySyncAdapter {
             }
         }
         Ok(deltas)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Live iroh-gossip adapter (Plan 008 Step 7)
+// ---------------------------------------------------------------------------
+
+/// Topic-keyed gossip sender map. One per subscribed note UUID.
+type TopicSenders = Mutex<HashMap<Uuid, GossipSender>>;
+
+/// Live iroh-gossip `SyncAdapter`. One Gossip handle shared across all note topics.
+///
+/// Each `subscribe` call joins a per-note gossip topic derived from the UUID bytes.
+/// `broadcast_delta` broadcasts the delta bytes to all peers in the topic.
+/// `pending_deltas` is not supported for the live adapter — use a dedicated
+/// receiver task instead (see the integration test for the subscribe_and_join pattern).
+///
+/// ponytail: pending_deltas returns empty for live adapter — callers should use
+/// the gossip receiver stream directly for production ingest.
+pub struct GossipSyncAdapter {
+    gossip: Gossip,
+    senders: TopicSenders,
+}
+
+impl GossipSyncAdapter {
+    /// Create a new adapter backed by the given iroh-gossip handle.
+    pub fn new(gossip: Gossip) -> Self {
+        Self {
+            gossip,
+            senders: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Derive a deterministic `TopicId` from a note UUID.
+    fn topic_for(note_uuid: Uuid) -> TopicId {
+        // UUID is 16 bytes; TopicId is 32 bytes — pad with zeros.
+        // ponytail: SHA-256 would be more collision-resistant but UUID is already
+        // unique by construction; this is sufficient for the gossip namespace.
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(note_uuid.as_bytes());
+        TopicId::from_bytes(bytes)
+    }
+}
+
+#[async_trait]
+impl SyncAdapter for GossipSyncAdapter {
+    async fn subscribe(&self, note_uuid: Uuid) -> Result<(), SyncAdapterError> {
+        let topic = Self::topic_for(note_uuid);
+        // Subscribe with no bootstrap peers — the hub or other peers join us.
+        let topic_handle = self
+            .gossip
+            .subscribe(topic, vec![])
+            .await
+            .map_err(|_| SyncAdapterError::SendFailed)?;
+        let (sender, _receiver) = topic_handle.split();
+        self.senders.lock().await.insert(note_uuid, sender);
+        Ok(())
+    }
+
+    async fn broadcast_delta(&self, note_uuid: Uuid, delta: Vec<u8>) -> Result<(), SyncAdapterError> {
+        let senders = self.senders.lock().await;
+        let sender = senders
+            .get(&note_uuid)
+            .ok_or(SyncAdapterError::NotSubscribed(note_uuid))?;
+        sender
+            .broadcast(Bytes::from(delta))
+            .await
+            .map_err(|_| SyncAdapterError::SendFailed)?;
+        Ok(())
+    }
+
+    /// Not supported for the live adapter; returns empty (use the GossipReceiver stream).
+    async fn pending_deltas(&self, _note_uuid: Uuid) -> Result<Vec<Vec<u8>>, SyncAdapterError> {
+        Ok(vec![])
     }
 }

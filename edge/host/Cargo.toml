@@ -23,6 +23,7 @@ surrealdb = { workspace = true }
 iroh = { workspace = true }
 iroh-gossip = "0.101.0"
 iroh-docs = "0.101.0"
+bytes = { workspace = true }
 loro = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
@@ -137,3 +138,8 @@ path = "tests/unit/snapshot_store_inmemory.rs"
 [[test]]
 name = "wikilink_rename"
 path = "tests/unit/wikilink_rename.rs"
+
+# 008 — live iroh-gossip integration test (requires loopback; ignored by default)
+[[test]]
+name = "vault_sync_live"
+path = "tests/integration/vault_sync_live.rs"
