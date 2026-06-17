@@ -43,6 +43,111 @@ fn abort_targets(live: &[String], target: Option<&str>) -> Vec<String> {
     }
 }
 
+/// Reset a reloaded run to a live state before re-entering the loop: a resumed
+/// session runs again, and any prior guardrail halt is cleared.
+fn prepare_resumed(mut run: Run) -> Run {
+    run.status = wagner_edge_host::state::RunStatus::Running;
+    run.halt_reason = None;
+    run
+}
+
+/// Everything `spawn_run_loop` needs to drive one session's goal loop. Grouped
+/// into a struct so both `start_run` (fresh) and `resume_run` (reloaded) build it
+/// the same way (and to keep the spawn signature off the clippy too-many-args path).
+struct SpawnLoop {
+    app: AppHandle,
+    run: Run,
+    roster: Roster,
+    cwd: std::path::PathBuf,
+    runs_root: std::path::PathBuf,
+    gate_config: wagner_edge_host::cli::GateConfig,
+    suite_command: Option<String>,
+    blocked_halt: Arc<AtomicBool>,
+    console: Arc<Mutex<Vec<ConsoleInput>>>,
+}
+
+/// Spawn the goal loop for one session on a background task and return its
+/// handle. The single source of truth for "run the loop" — shared by `start_run`
+/// and `resume_run` so the two never drift.
+fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
+    let SpawnLoop {
+        app,
+        run,
+        roster,
+        cwd,
+        runs_root,
+        gate_config,
+        suite_command,
+        blocked_halt,
+        console,
+    } = s;
+    let app_for_loop = app;
+    let console_for_loop = console;
+    let suite_for_loop = suite_command;
+    let blocked_for_loop = blocked_halt;
+    let suite_cwd = cwd.clone();
+    tauri::async_runtime::spawn(async move {
+        // Build one CLI runner per hired agent: Claude agents get the US2 gate
+        // and their skill prompt; Codex agents get theirs. The pool routes the
+        // loop's plan/judge to the lead and each subtask to its assigned agent.
+        let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
+        let app_for_emit = app_for_loop.clone();
+        let emit = move |ev: wagner_edge_host::events::WagnerEvent| {
+            let _ = app_for_emit.emit("wagner://event", ev);
+        };
+        // The suite shell-out is blocking and arbitrarily long; offload it to a
+        // blocking thread so it never starves the async runtime (M4).
+        let suite = move || -> futures::future::BoxFuture<'static, wagner_edge_host::orchestrator::judge::SuiteResult> {
+            let cmd = suite_for_loop.clone();
+            let cwd = suite_cwd.clone();
+            Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    crate::suite::run_suite(cmd.as_deref(), &cwd)
+                })
+                .await
+                .unwrap_or(wagner_edge_host::orchestrator::judge::SuiteResult { passed: false })
+            })
+        };
+        // Drain steering instructions submitted since the last iteration (US3).
+        let steer = move || std::mem::take(&mut *console_for_loop.lock().unwrap());
+        // Promote a gate blocked-timeout to a whole-run halt (T042).
+        let external_halt = move || {
+            blocked_for_loop
+                .load(Ordering::SeqCst)
+                .then_some(wagner_edge_host::state::HaltReason::BlockedTimeout)
+        };
+        // Live snapshot each phase/iteration → mission bar updates in real time.
+        let app_for_progress = app_for_loop.clone();
+        let progress = move |r: &wagner_edge_host::state::Run| {
+            let _ = app_for_progress.emit("wagner://run", r.clone());
+        };
+        // An agent-authored UI-spec panel → the inspector's "AGENT VIEW" (P5).
+        let app_for_panel = app_for_loop.clone();
+        let emit_panel = move |operative_id: &str, spec: serde_json::Value| {
+            let _ = app_for_panel.emit(
+                "wagner://panel",
+                serde_json::json!({ "operative_id": operative_id, "spec": spec }),
+            );
+        };
+
+        let final_run = run_goal(
+            run,
+            LoopDeps {
+                pool: &pool,
+                run_suite: &suite,
+                runs_root: &runs_root,
+                emit: &emit,
+                steer: &steer,
+                external_halt: &external_halt,
+                progress: &progress,
+                emit_panel: &emit_panel,
+            },
+        )
+        .await;
+        let _ = app_for_loop.emit("wagner://run", final_run);
+    })
+}
+
 struct RunControl {
     task: tauri::async_runtime::JoinHandle<()>,
     /// The loopback permission server task (US2 gate). Aborted with the run.
@@ -200,72 +305,16 @@ pub async fn start_run(
     )
     .await?;
 
-    let app_for_loop = app.clone();
-    let console_for_loop = console.clone();
-    let suite_for_loop = suite_command.clone();
-    let gate_config = gate.config.clone();
-    let blocked_for_loop = blocked_halt.clone();
-    let cwd = project_cwd.clone();
-    let suite_cwd = project_cwd.clone();
-    let task = tauri::async_runtime::spawn(async move {
-        // Build one CLI runner per hired agent: Claude agents get the US2 gate
-        // and their skill prompt; Codex agents get theirs. The pool routes the
-        // loop's plan/judge to the lead and each subtask to its assigned agent.
-        let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
-        let app_for_emit = app_for_loop.clone();
-        let emit = move |ev: wagner_edge_host::events::WagnerEvent| {
-            let _ = app_for_emit.emit("wagner://event", ev);
-        };
-        // The suite shell-out is blocking and arbitrarily long; offload it to a
-        // blocking thread so it never starves the async runtime (M4).
-        let suite = move || -> futures::future::BoxFuture<'static, wagner_edge_host::orchestrator::judge::SuiteResult> {
-            let cmd = suite_for_loop.clone();
-            let cwd = suite_cwd.clone();
-            Box::pin(async move {
-                tokio::task::spawn_blocking(move || {
-                    crate::suite::run_suite(cmd.as_deref(), &cwd)
-                })
-                .await
-                .unwrap_or(wagner_edge_host::orchestrator::judge::SuiteResult { passed: false })
-            })
-        };
-        // Drain steering instructions submitted since the last iteration (US3).
-        let steer = move || std::mem::take(&mut *console_for_loop.lock().unwrap());
-        // Promote a gate blocked-timeout to a whole-run halt (T042).
-        let external_halt = move || {
-            blocked_for_loop
-                .load(Ordering::SeqCst)
-                .then_some(wagner_edge_host::state::HaltReason::BlockedTimeout)
-        };
-        // Live snapshot each phase/iteration → mission bar updates in real time.
-        let app_for_progress = app_for_loop.clone();
-        let progress = move |r: &wagner_edge_host::state::Run| {
-            let _ = app_for_progress.emit("wagner://run", r.clone());
-        };
-        // An agent-authored UI-spec panel → the inspector's "AGENT VIEW" (P5).
-        let app_for_panel = app_for_loop.clone();
-        let emit_panel = move |operative_id: &str, spec: serde_json::Value| {
-            let _ = app_for_panel.emit(
-                "wagner://panel",
-                serde_json::json!({ "operative_id": operative_id, "spec": spec }),
-            );
-        };
-
-        let final_run = run_goal(
-            run,
-            LoopDeps {
-                pool: &pool,
-                run_suite: &suite,
-                runs_root: &runs_root,
-                emit: &emit,
-                steer: &steer,
-                external_halt: &external_halt,
-                progress: &progress,
-                emit_panel: &emit_panel,
-            },
-        )
-        .await;
-        let _ = app_for_loop.emit("wagner://run", final_run);
+    let task = spawn_run_loop(SpawnLoop {
+        app: app.clone(),
+        run,
+        roster,
+        cwd: project_cwd.clone(),
+        runs_root,
+        gate_config: gate.config.clone(),
+        suite_command,
+        blocked_halt,
+        console: console.clone(),
     });
 
     mgr.runs.lock().unwrap().insert(
@@ -277,6 +326,67 @@ pub async fn start_run(
         },
     );
     Ok(run_id)
+}
+
+/// Resume a persisted session (acceptance E6): load its state, rebuild the gate
+/// and the agent pool against the persisted `project_dir`, and re-enter the goal
+/// loop — sharing `spawn_run_loop` with `start_run` so the two never drift.
+/// ponytail: the hired roster and suite command aren't persisted on `Run`, so a
+/// resumed session uses the default roster and no suite. Persist them on `Run`
+/// to restore custom rosters when that matters.
+#[tauri::command]
+pub async fn resume_run(
+    app: AppHandle,
+    mgr: State<'_, RunManager>,
+    reg: State<'_, Arc<TransmissionRegistry>>,
+    run_id: String,
+) -> Result<(), String> {
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let runs_root = app_data.join("runs");
+    let run = prepare_resumed(
+        wagner_edge_host::state::load(&runs_root, &run_id).map_err(|e| e.to_string())?,
+    );
+
+    // Rebuild the run cwd from the persisted project dir (falls back to the app's
+    // cwd for legacy runs that never stored one).
+    let project_cwd = resolve_project_dir(
+        &run.project_dir,
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )?;
+    let roster = Roster::default_roster();
+    let console = Arc::new(Mutex::new(Vec::<ConsoleInput>::new()));
+
+    let blocked_halt = Arc::new(AtomicBool::new(false));
+    let gate = crate::gate::start_gate_server(
+        &app,
+        &app_data,
+        reg.inner().clone(),
+        u64::from(run.guardrails.blocked_timeout_secs),
+        blocked_halt.clone(),
+    )
+    .await?;
+
+    let task = spawn_run_loop(SpawnLoop {
+        app: app.clone(),
+        run,
+        roster,
+        cwd: project_cwd,
+        runs_root,
+        gate_config: gate.config.clone(),
+        suite_command: None,
+        blocked_halt,
+        console: console.clone(),
+    });
+
+    mgr.runs.lock().unwrap().insert(
+        run_id,
+        RunControl {
+            task,
+            gate_server: gate.server_task,
+            console,
+        },
+    );
+    Ok(())
 }
 
 /// The workflow templates for the builder's picker (decision #4): the built-in
@@ -696,8 +806,24 @@ fn resolve_project_dir(
 
 #[cfg(test)]
 mod tests {
-    use super::{abort_targets, resolve_project_dir, validate_project_dir};
+    use super::{abort_targets, prepare_resumed, resolve_project_dir, validate_project_dir};
     use std::path::PathBuf;
+
+    #[test]
+    fn prepare_resumed_sets_running_and_clears_halt() {
+        use wagner_edge_host::state::{HaltReason, Run, RunStatus};
+        let mut run = Run::new(
+            "01J0RESUME0000000000000001".into(),
+            "resume me".into(),
+            vec![],
+            "2026-06-17T00:00:00Z".into(),
+        );
+        run.status = RunStatus::Paused;
+        run.halt_reason = Some(HaltReason::BlockedTimeout);
+        let resumed = prepare_resumed(run);
+        assert_eq!(resumed.status, RunStatus::Running);
+        assert_eq!(resumed.halt_reason, None);
+    }
 
     #[test]
     fn abort_targets_selects_one_or_all() {

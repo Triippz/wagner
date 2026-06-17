@@ -75,6 +75,7 @@ pub fn run() {
             commands::abort,
             commands::list_runs,
             commands::get_run,
+            commands::resume_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running wagner-edge-shell");

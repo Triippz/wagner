@@ -76,6 +76,8 @@ export const cmd = {
   listRuns: () => invoke<RunSummary[]>("list_runs"),
   /** Full state of one persisted session (reopening from the rail). */
   getRun: (runId: string) => invoke<RunSnapshot>("get_run", { runId }),
+  /** Resume a closed/paused session — rebuilds the loop and re-enters it. */
+  resumeRun: (runId: string) => invoke<void>("resume_run", { runId }),
   answerTransmission: (id: string, response: string) =>
     invoke<void>("answer_transmission", { id, response }),
 };
