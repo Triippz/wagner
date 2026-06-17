@@ -33,6 +33,8 @@ surrealdb = { version = "2", default-features = false, features = ["kv-surrealkv
 # shell at US1 (T019), per the workspace convention above.
 iroh = "1"
 loro = "=1.13.1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
 notify = "8"
 notify-debouncer-mini = "0.7"
 similar = "2"

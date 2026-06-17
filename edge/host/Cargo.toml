@@ -24,6 +24,8 @@ iroh = { workspace = true }
 iroh-gossip = "0.101.0"
 iroh-docs = "0.101.0"
 loro = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 similar = { workspace = true }
@@ -105,3 +107,8 @@ path = "tests/integration/devctx_privacy.rs"
 [[test]]
 name = "attach_perf"
 path = "tests/integration/attach_perf.rs"
+
+# 006 — vault sync unit tests
+[[test]]
+name = "vault_crdt_init"
+path = "tests/unit/vault_crdt_init.rs"

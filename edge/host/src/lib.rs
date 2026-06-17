@@ -19,6 +19,9 @@ pub mod transmissions;
 pub mod remote;
 pub mod tray;
 
+// 006 — distributed vault sync v1
+pub mod vault;
+
 #[cfg(test)]
 mod foundation_tests {
     use crate::events::{
