@@ -638,6 +638,30 @@ pub fn abort(mgr: State<'_, RunManager>, run_id: Option<String>) -> Result<(), S
     Ok(())
 }
 
+/// List persisted sessions newest-first for the session rail — reads
+/// `{app_data}/runs/*/state.json`. Corrupt/legacy run dirs are skipped; an
+/// absent runs dir (no sessions yet) yields an empty list.
+#[tauri::command]
+pub fn list_runs(app: AppHandle) -> Result<Vec<wagner_edge_host::state::RunSummary>, String> {
+    let runs_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runs");
+    wagner_edge_host::state::list_summaries(&runs_root).map_err(|e| e.to_string())
+}
+
+/// Load one persisted run's full state (reopening a session from the rail).
+#[tauri::command]
+pub fn get_run(app: AppHandle, run_id: String) -> Result<Run, String> {
+    let runs_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runs");
+    wagner_edge_host::state::load(&runs_root, &run_id).map_err(|e| e.to_string())
+}
+
 /// Resolve the engineer-selected project directory into an existing directory
 /// the operatives run in. A blank selection falls back to `fallback` (the app's
 /// cwd). A leading `~` expands to `$HOME`. Errors if the path is not an existing

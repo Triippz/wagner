@@ -1,10 +1,23 @@
 //! Run-state persistence: atomic JSON writes (D-RES-1) validated against
 //! `run-state.schema.json` before they touch disk (Article VII).
 
-use super::run::Run;
+use super::run::{Run, RunStatus};
 use crate::schema::{self, RUN_STATE_SCHEMA};
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+/// Lightweight per-run summary for the session rail — enough to list and order
+/// sessions without loading every full `Run`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunSummary {
+    pub run_id: String,
+    pub name: String,
+    pub project_dir: String,
+    pub status: RunStatus,
+    pub updated_at: String,
+    pub goal: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -65,6 +78,44 @@ pub fn load(runs_root: &Path, run_id: &str) -> Result<Run, StoreError> {
     serde_json::from_value(value).map_err(|e| StoreError::Serde(e.to_string()))
 }
 
+/// List every persisted run under `runs_root` as a summary, newest-first by
+/// `updated_at`. Best-effort: a run dir whose `state.json` is missing, corrupt,
+/// or schema-invalid is skipped (never fatal) so one bad run can't blank the
+/// rail. A missing `runs_root` (no runs yet) yields an empty list, not an error.
+pub fn list_summaries(runs_root: &Path) -> Result<Vec<RunSummary>, StoreError> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(runs_root) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries.flatten() {
+        let run_id = entry.file_name().to_string_lossy().into_owned();
+        let run = match load(runs_root, &run_id) {
+            Ok(r) => r,
+            Err(_) => continue, // skip missing/corrupt/invalid run dirs
+        };
+        // Legacy runs may have no updated_at — fall back to created_at for order.
+        let updated_at = if run.updated_at.is_empty() {
+            run.created_at.clone()
+        } else {
+            run.updated_at.clone()
+        };
+        out.push(RunSummary {
+            run_id: run.run_id,
+            name: run.name,
+            project_dir: run.project_dir,
+            status: run.status,
+            updated_at,
+            goal: run.goal,
+        });
+    }
+    // Newest-first: updated_at is a normalized RFC3339 `…Z` string, so a plain
+    // reverse lexicographic compare is chronological.
+    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +171,42 @@ mod tests {
         assert_eq!(loaded.goals, Vec::<String>::new());
         assert_eq!(loaded.project_dir, "");
         assert_eq!(loaded.name, "");
+    }
+
+    #[test]
+    fn list_summaries_newest_first_skips_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        for (id, updated) in [
+            ("01A0000000000000000000000A", "2026-06-17T03:00:00Z"),
+            ("01B0000000000000000000000B", "2026-06-17T01:00:00Z"),
+            ("01C0000000000000000000000C", "2026-06-17T02:00:00Z"),
+        ] {
+            let mut r = sample(id);
+            r.updated_at = updated.into();
+            r.name = format!("name-{id}");
+            save(dir.path(), &r).unwrap();
+        }
+        // A corrupt run dir must be skipped, not fatal (acceptance E5).
+        let bad = run_state_path(dir.path(), "01BAD000000000000000000BAD");
+        std::fs::create_dir_all(bad.parent().unwrap()).unwrap();
+        std::fs::write(&bad, b"{ not valid json").unwrap();
+
+        let summaries = list_summaries(dir.path()).unwrap();
+        let ids: Vec<_> = summaries.iter().map(|s| s.run_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "01A0000000000000000000000A",
+                "01C0000000000000000000000C",
+                "01B0000000000000000000000B"
+            ]
+        );
+    }
+
+    #[test]
+    fn list_summaries_empty_when_no_runs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        assert!(list_summaries(&missing).unwrap().is_empty());
     }
 }

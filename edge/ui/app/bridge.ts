@@ -10,6 +10,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { TauriBridge } from "../transport/ipc";
+import type { RunSnapshot, RunStatus } from "../store/types";
+
+/** Lightweight session summary for the rail (mirrors host `RunSummary`). */
+export interface RunSummary {
+  run_id: string;
+  name: string;
+  project_dir: string;
+  status: RunStatus;
+  updated_at: string;
+  goal: string;
+}
 
 export const tauriBridge: TauriBridge = {
   listen: (channel, handler) => listen(channel, (e) => handler(e.payload)),
@@ -61,6 +72,10 @@ export const cmd = {
     }),
   steer: (text: string) => invoke<void>("steer", { text }),
   abort: () => invoke<void>("abort"),
+  /** Persisted sessions for the rail, newest-first. */
+  listRuns: () => invoke<RunSummary[]>("list_runs"),
+  /** Full state of one persisted session (reopening from the rail). */
+  getRun: (runId: string) => invoke<RunSnapshot>("get_run", { runId }),
   answerTransmission: (id: string, response: string) =>
     invoke<void>("answer_transmission", { id, response }),
 };

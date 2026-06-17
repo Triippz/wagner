@@ -7,4 +7,4 @@ pub use run::{
     ConsoleInput, CostBudget, CostMode, Guardrails, HaltReason, Run, RunPhase, RunStatus, Subtask,
     SubtaskState,
 };
-pub use store::{load, run_state_path, save, StoreError, WriteOutcome};
+pub use store::{load, list_summaries, run_state_path, save, RunSummary, StoreError, WriteOutcome};
