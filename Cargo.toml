@@ -32,3 +32,7 @@ surrealdb = { version = "2", default-features = false, features = ["kv-surrealkv
 # early; first used at US2 (T027). Tauri tray/notification deps land with the
 # shell at US1 (T019), per the workspace convention above.
 iroh = "1"
+loro = "=1.13.1"
+notify = "8"
+notify-debouncer-mini = "0.7"
+similar = "2"

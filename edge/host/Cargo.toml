@@ -21,6 +21,12 @@ surrealdb = { workspace = true }
 # Remote transport (ADR-0003); wired at US2 T027. Declared at Setup (T001) to
 # verify it resolves + builds on the carried 1.90 toolchain.
 iroh = { workspace = true }
+iroh-gossip = "0.101.0"
+iroh-docs = "0.101.0"
+loro = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+similar = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
