@@ -17,12 +17,16 @@ Commit each green step (to `feat/autonomous-build`; see rule 1). No questions
 unless a hard blocker forces it. Decisions come from the plans + sensible
 defaults, recorded in `memory/`.
 
-### Parallel lanes — BOTH INTEGRATED ✓
-- `lane/voice` — Voice pillar (Stt/Tts traits + FakeStt/FakeTts + VoiceRouter +
-  VoicePipeline + 9 integration tests). Merged. `edge/host/src/voice/**`.
-- `lane/devex` — `hub/Dockerfile` + `docker-compose.yml` + `hub/.dockerignore`,
-  hub E2E (`hub/tests/e2e/hub_server.test.ts`, `make hub-e2e`, 7 tests),
-  `docs/development.md`, Makefile `dev-setup`/`docker-hub`. Merged.
+### Parallel lanes
+INTEGRATED ✓: `lane/voice` (Voice pillar), `lane/devex` (Docker + hub E2E + docs).
+IN FLIGHT (integrate when they report green — `git merge lane/<name>` then
+`make verify`/`make accept`):
+- `lane/graph` — Phase 4 Graph view + Vault browser (vault_graph IPC + React Flow
+  `@xyflow/react` + VaultGraph/VaultBrowser components + staging approval UI +
+  specs/005-graph-view/plan.md). Touches edge/host/src/memory.rs,
+  edge/shell/src/commands.rs+lib.rs, edge/ui/**. DO NOT edit those until merged.
+- (planning agent) authoring `specs/006-sync/plan.md` + `specs/008-hub-vault/plan.md`
+  (no code). When done, build Sync (006) in the main loop — highest-risk; then Hub (008).
 
 Wagner = a distributed engineering platform: run autonomous coding agents and
 accumulate what they learn into a shared, living knowledge base. **Edge executes,
