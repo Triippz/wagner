@@ -43,12 +43,22 @@ export function createIpcTransport(bridge: TauriBridge): EventStreamTransport {
       };
     },
     send(message: TransportMessage) {
-      // Control messages map to the carried Tauri commands (answer/steer/abort).
-      // Allowlist the permitted kind suffixes so only known commands are invoked.
-      const ALLOWED_KINDS = new Set(["answer_permission", "steer", "abort", "control"]);
+      // Control messages map to the REAL Tauri command names (not `wagner_${kind}`
+      // — the host registers bare `steer`/`abort`/`answer_transmission`). This is
+      // also the allowlist: a kind with no mapping is dropped, so no arbitrary
+      // command name can reach `invoke`.
+      const COMMAND_BY_KIND: Record<string, string> = {
+        steer: "steer",
+        abort: "abort",
+        answer_permission: "answer_transmission",
+      };
       const rawKind = (message as { kind?: string }).kind;
-      const kind = typeof rawKind === "string" && ALLOWED_KINDS.has(rawKind) ? rawKind : "control";
-      return bridge.invoke(`wagner_${kind}`, message as Record<string, unknown>).then(() => {});
+      const command = typeof rawKind === "string" ? COMMAND_BY_KIND[rawKind] : undefined;
+      if (!command) {
+        console.warn("[ipc] dropping control message with unmapped kind:", rawKind);
+        return Promise.resolve();
+      }
+      return bridge.invoke(command, message as Record<string, unknown>).then(() => {});
     },
   };
 }

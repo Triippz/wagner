@@ -53,7 +53,8 @@ export interface StartRunInput {
   goal: string;
   projectDir: string;
   docs: string[];
-  guardrails: GuardrailInput;
+  /** Optional: the redesigned entry screen omits these (host applies defaults). */
+  guardrails?: GuardrailInput;
 }
 
 export const cmd = {
@@ -66,7 +67,7 @@ export const cmd = {
     invoke<string>("start_run", {
       goal: input.goal,
       docs: input.docs,
-      guardrails: input.guardrails,
+      guardrails: input.guardrails ?? null,
       projectDir: input.projectDir,
       roster: null,
     }),

@@ -43,12 +43,12 @@ describe("IPC adapter", () => {
     expect(received).toContainEqual({ channel: "event", payload: { operative_id: "cipher" } });
   });
 
-  it("routes a control send to the carried Tauri command", async () => {
+  it("routes a control send to the real Tauri command name", async () => {
     const f = fakeBridge();
     const transport = createIpcTransport(f.bridge);
     await transport.send({ kind: "steer", text: "go" });
     expect(f.invokes).toContainEqual({
-      command: "wagner_steer",
+      command: "steer",
       args: { kind: "steer", text: "go" },
     });
   });
@@ -63,20 +63,19 @@ describe("IPC adapter", () => {
     expect(f.unlistenedCount()).toBe(3);
   });
 
-  it("maps an unknown kind to wagner_control (allowlist defence)", async () => {
+  it("drops an unmapped kind (allowlist defence — no invoke)", async () => {
     const f = fakeBridge();
     const transport = createIpcTransport(f.bridge);
-    // kind not in the permitted set → must not build an arbitrary command name
+    // kind not in the map → must NOT build/invoke an arbitrary command name
     await transport.send({ kind: "DROP_TABLE", text: "pwned" });
-    expect(f.invokes[0]?.command).toBe("wagner_control");
+    expect(f.invokes).toHaveLength(0);
   });
 
-  it("maps each permitted kind to its exact Tauri command", async () => {
+  it("maps each permitted kind to its real Tauri command", async () => {
     const cases: Array<{ kind: string; expected: string }> = [
-      { kind: "answer_permission", expected: "wagner_answer_permission" },
-      { kind: "steer", expected: "wagner_steer" },
-      { kind: "abort", expected: "wagner_abort" },
-      { kind: "control", expected: "wagner_control" },
+      { kind: "answer_permission", expected: "answer_transmission" },
+      { kind: "steer", expected: "steer" },
+      { kind: "abort", expected: "abort" },
     ];
     for (const { kind, expected } of cases) {
       const f = fakeBridge();
@@ -84,5 +83,10 @@ describe("IPC adapter", () => {
       await transport.send({ kind });
       expect(f.invokes[0]?.command).toBe(expected);
     }
+    // "control" is no longer a command → dropped, not invoked.
+    const fc = fakeBridge();
+    const tc = createIpcTransport(fc.bridge);
+    await tc.send({ kind: "control" });
+    expect(fc.invokes).toHaveLength(0);
   });
 });

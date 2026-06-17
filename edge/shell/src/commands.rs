@@ -177,6 +177,20 @@ pub struct GuardrailConfig {
     pub suite_command: Option<String>,
 }
 
+impl Default for GuardrailConfig {
+    /// Mirrors `Guardrails::defaults()` (R-GUARDRAILS): unbounded iterations, a
+    /// 30-minute blocked timeout, no cost cap, no suite (the repo's CLAUDE.md /
+    /// AGENTS.md declares how it tests). Used when the UI omits guardrails.
+    fn default() -> Self {
+        Self {
+            max_iterations: None,
+            blocked_timeout_secs: 30 * 60,
+            cost_budget: None,
+            suite_command: None,
+        }
+    }
+}
+
 /// Detect CLI availability + API-key env (EC-004, SC-002).
 #[tauri::command]
 pub fn preflight() -> CliStatus {
@@ -242,13 +256,16 @@ pub async fn start_run(
     store: State<'_, MemoryStore>,
     goal: String,
     docs: Vec<String>,
-    guardrails: GuardrailConfig,
+    guardrails: Option<GuardrailConfig>,
     project_dir: String,
     roster: Option<Vec<Agent>>,
 ) -> Result<String, String> {
     if goal.trim().is_empty() {
         return Err("goal must not be empty".into());
     }
+    // The redesigned entry screen sends only a folder + goal; guardrails default
+    // to R-GUARDRAILS when omitted (acceptance E9).
+    let guardrails = guardrails.unwrap_or_default();
     // The hired-agent roster the run deploys. A blank/absent roster falls back to
     // the default two-agent org (Cipher/Vex). Validated before the run starts.
     let roster = match roster {
@@ -897,6 +914,17 @@ mod tests {
         let resumed = prepare_resumed(run);
         assert_eq!(resumed.status, RunStatus::Running);
         assert_eq!(resumed.halt_reason, None);
+    }
+
+    #[test]
+    fn guardrail_config_default_matches_r_guardrails() {
+        // Acceptance E9: omitted guardrails fall back to unbounded iterations,
+        // a 30-min blocked timeout, and no cost cap / suite.
+        let g = super::GuardrailConfig::default();
+        assert_eq!(g.max_iterations, None);
+        assert_eq!(g.blocked_timeout_secs, 30 * 60);
+        assert_eq!(g.cost_budget, None);
+        assert_eq!(g.suite_command, None);
     }
 
     #[test]
