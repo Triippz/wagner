@@ -19,5 +19,7 @@ deno.lock.tmp
 # IDE
 .idea/
 .vscode/
+# Local rollback backups (global convention; never committed)
+.backups/
 # Logs
 *.log
