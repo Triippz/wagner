@@ -1,93 +1,260 @@
 #!/usr/bin/env bash
-# Start/stop the voice STT+TTS sidecars that HttpStt/HttpTts (and `make
-# voice-e2e`) expect on 127.0.0.1:8771 / :8772.
+# Native launcher for the Wagner voice sidecars.
+# No Docker — both engines are native binaries.
 #
-#   STT  faster-whisper-server  (OpenAI-compatible /v1/audio/transcriptions)
-#   TTS  Kokoro-FastAPI         (OpenAI-compatible /v1/audio/speech)
+#   STT  whisper-server (whisper.cpp, brew install whisper-cpp)
+#        → POST /v1/audio/transcriptions  on 127.0.0.1:8771
 #
-# Both run as off-the-shelf CPU Docker images — no Python venv, no model
-# vendoring. Models download on first use into named volumes (cached across
-# restarts).
+#   TTS  wagner-tts-sidecar (Rust, built from crate edge/tts-sidecar)
+#        → POST /v1/audio/speech          on 127.0.0.1:8772
 #
-#   scripts/voice-sidecars.sh start    # pull (if needed) + run + wait ready
-#   scripts/voice-sidecars.sh stop     # stop + remove both containers
-#   scripts/voice-sidecars.sh status   # show container + port state
+# Usage:
+#   scripts/voice-sidecars.sh start    # download models if needed → spawn both → wait ready
+#   scripts/voice-sidecars.sh stop     # kill both sidecars
+#   scripts/voice-sidecars.sh status   # show running state
 #
-# ponytail: published images implement the exact wire contract; this script is
-# just lifecycle glue. Swap the image tags below if upstream moves.
+# Environment:
+#   WAGNER_VOICE_HOME   — cache root (default: $HOME/.cache/wagner-voice)
+#   WAGNER_REPO_ROOT    — repo root for finding the tts-sidecar binary (auto-detected)
+#
 set -euo pipefail
 
-STT_IMAGE="fedirz/faster-whisper-server:latest-cpu"
-TTS_IMAGE="ghcr.io/remsky/kokoro-fastapi-cpu:latest"
-STT_NAME="wagner-stt"
-TTS_NAME="wagner-tts"
-STT_PORT=8771   # host port HttpStt::new("http://127.0.0.1:8771") expects
-TTS_PORT=8772   # host port HttpTts::new("http://127.0.0.1:8772") expects
-STT_INTERNAL=8000   # faster-whisper-server listens here inside the container
-TTS_INTERNAL=8880   # Kokoro-FastAPI listens here inside the container
-# Tiny English model: fast + small (~75MB) — enough to prove the pipeline.
-STT_MODEL="Systran/faster-whisper-tiny.en"
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 
-err() { echo "[voice-sidecars] $*" >&2; }
+VOICE_HOME="${WAGNER_VOICE_HOME:-${HOME}/.cache/wagner-voice}"
+MODEL_DIR="${VOICE_HOME}/models"
+PID_DIR="${VOICE_HOME}/run"
 
-wait_ready() {
-  local name="$1" port="$2" tries=60
-  err "waiting for $name on :$port (up to ${tries}s)…"
-  for ((i = 0; i < tries; i++)); do
-    # Any real HTTP response (curl prints 000 when nothing is listening) means
-    # the server is up. Don't `|| echo` — that concatenates onto the -w output.
-    local code
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${port}/health" 2>/dev/null) || true
-    if [[ "$code" =~ ^[1-5][0-9][0-9]$ ]]; then
-      err "$name ready (HTTP $code on /health)"
-      return 0
+# Auto-detect repo root (the directory that contains this script's parent).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${WAGNER_REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+STT_PORT=8771
+TTS_PORT=8772
+
+# Whisper model
+STT_MODEL_FILE="${MODEL_DIR}/ggml-tiny.en.bin"
+STT_MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+
+# Kokoro ONNX model + voices
+TTS_MODEL_FILE="${MODEL_DIR}/model_quantized.onnx"
+TTS_MODEL_URL="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model_quantized.onnx"
+TTS_VOICES_FILE="${MODEL_DIR}/voices-v1.0.bin"
+TTS_VOICES_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+
+# TTS sidecar binary
+TTS_BIN="${REPO_ROOT}/target/release/wagner-tts-sidecar"
+
+# PID files
+STT_PID_FILE="${PID_DIR}/stt.pid"
+TTS_PID_FILE="${PID_DIR}/tts.pid"
+STT_LOG_FILE="${PID_DIR}/stt.log"
+TTS_LOG_FILE="${PID_DIR}/tts.log"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+log() { echo "[voice-sidecars] $*" >&2; }
+
+# Download a file if it does not exist (or is 0 bytes). Idempotent, resumable.
+download_if_missing() {
+    local url="$1" dest="$2" label="$3"
+    if [[ -f "${dest}" && -s "${dest}" ]]; then
+        log "${label} already cached at ${dest}"
+        return 0
     fi
-    if ! docker ps --format '{{.Names}}' | grep -q "^${name}$"; then
-      err "FAIL: $name container exited early — logs:"
-      docker logs --tail 20 "$name" 2>&1 | sed 's/^/    /' >&2
-      return 1
-    fi
-    sleep 1
-  done
-  err "FAIL: $name not ready after ${tries}s — logs:"
-  docker logs --tail 20 "$name" 2>&1 | sed 's/^/    /' >&2
-  return 1
+    log "downloading ${label} → ${dest}"
+    mkdir -p "$(dirname "${dest}")"
+    # -f: fail on server error, -L: follow redirects, -C -: resume if partial
+    curl -fL -C - --progress-bar -o "${dest}" "${url}"
+    log "${label} download complete ($(du -h "${dest}" | cut -f1))"
 }
+
+# Return 0 if a process with the given PID is running.
+pid_alive() {
+    local pid="$1"
+    [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+# Read a PID file; echo the PID if the process is alive, else nothing.
+read_pid() {
+    local pidfile="$1"
+    if [[ -f "${pidfile}" ]]; then
+        local pid
+        pid="$(cat "${pidfile}")"
+        if pid_alive "${pid}"; then
+            echo "${pid}"
+        fi
+    fi
+}
+
+# Wait for a TCP port to accept connections (process-based, not /health).
+# The TTS sidecar has no /health route; we poll the port directly.
+wait_port() {
+    local label="$1" port="$2" pidfile="$3" tries=60
+    log "waiting for ${label} on :${port} (up to ${tries}s)…"
+    for ((i = 0; i < tries; i++)); do
+        # nc -z exits 0 when the port accepts a connection.
+        if nc -z 127.0.0.1 "${port}" 2>/dev/null; then
+            log "${label} accepting connections on :${port}"
+            return 0
+        fi
+        # Bail early if the process has already died.
+        local pid
+        pid="$(read_pid "${pidfile}")" || true
+        if [[ -z "${pid}" ]]; then
+            log "FAIL: ${label} process exited before becoming ready"
+            return 1
+        fi
+        sleep 1
+    done
+    log "FAIL: ${label} not ready after ${tries}s"
+    return 1
+}
+
+# Wait for whisper-server's /health endpoint to return a valid HTTP response.
+wait_http_health() {
+    local label="$1" port="$2" pidfile="$3" tries=60
+    log "waiting for ${label} /health on :${port} (up to ${tries}s)…"
+    for ((i = 0; i < tries; i++)); do
+        local code
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 \
+            "http://127.0.0.1:${port}/health" 2>/dev/null)" || true
+        if [[ "${code}" =~ ^[1-5][0-9][0-9]$ ]]; then
+            log "${label} ready (HTTP ${code} on /health)"
+            return 0
+        fi
+        local pid
+        pid="$(read_pid "${pidfile}")" || true
+        if [[ -z "${pid}" ]]; then
+            log "FAIL: ${label} process exited before /health was ready"
+            return 1
+        fi
+        sleep 1
+    done
+    log "FAIL: ${label} /health not ready after ${tries}s"
+    return 1
+}
+
+# Kill a process by PID file (best-effort).
+kill_pid_file() {
+    local label="$1" pidfile="$2"
+    if [[ -f "${pidfile}" ]]; then
+        local pid
+        pid="$(cat "${pidfile}")"
+        if pid_alive "${pid}"; then
+            log "stopping ${label} (pid ${pid})"
+            kill "${pid}" 2>/dev/null || true
+        fi
+        rm -f "${pidfile}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# start
+# ---------------------------------------------------------------------------
 
 start() {
-  docker rm -f "$STT_NAME" "$TTS_NAME" >/dev/null 2>&1 || true
+    # 1. Ensure whisper-server is on PATH.
+    if ! command -v whisper-server >/dev/null 2>&1; then
+        log "ERROR: whisper-server not found."
+        log "       Install with: brew install whisper-cpp"
+        exit 1
+    fi
 
-  err "starting STT ($STT_IMAGE) → :$STT_PORT"
-  docker run -d --name "$STT_NAME" \
-    -p "127.0.0.1:${STT_PORT}:${STT_INTERNAL}" \
-    -e "WHISPER__MODEL=${STT_MODEL}" \
-    -v wagner-stt-cache:/root/.cache \
-    "$STT_IMAGE" >/dev/null
+    # 2. Ensure TTS sidecar binary exists (build if missing).
+    if [[ ! -x "${TTS_BIN}" ]]; then
+        log "wagner-tts-sidecar binary not found; building…"
+        cargo build -p wagner-tts-sidecar --release \
+            --manifest-path "${REPO_ROOT}/Cargo.toml"
+        log "build complete: ${TTS_BIN}"
+    else
+        log "TTS sidecar binary: ${TTS_BIN}"
+    fi
 
-  err "starting TTS ($TTS_IMAGE) → :$TTS_PORT"
-  docker run -d --name "$TTS_NAME" \
-    -p "127.0.0.1:${TTS_PORT}:${TTS_INTERNAL}" \
-    -v wagner-tts-cache:/root/.cache \
-    "$TTS_IMAGE" >/dev/null
+    # 3. Download models if missing (idempotent, resumable).
+    download_if_missing "${STT_MODEL_URL}" "${STT_MODEL_FILE}" "ggml-tiny.en.bin (STT)"
+    download_if_missing "${TTS_MODEL_URL}"    "${TTS_MODEL_FILE}"  "model_quantized.onnx (TTS)"
+    download_if_missing "${TTS_VOICES_URL}"   "${TTS_VOICES_FILE}" "voices-v1.0.bin (TTS)"
 
-  wait_ready "$STT_NAME" "$STT_PORT"
-  wait_ready "$TTS_NAME" "$TTS_PORT"
-  err "both sidecars up. run: make voice-e2e"
+    # 4. Create run dir for PID/log files.
+    mkdir -p "${PID_DIR}"
+
+    # 5. Stop any stale instances.
+    kill_pid_file "whisper-server" "${STT_PID_FILE}"
+    kill_pid_file "wagner-tts-sidecar" "${TTS_PID_FILE}"
+
+    # 6. Spawn whisper-server (STT) in the background.
+    log "spawning whisper-server → :${STT_PORT}"
+    whisper-server \
+        --host 127.0.0.1 \
+        --port "${STT_PORT}" \
+        --inference-path /v1/audio/transcriptions \
+        --model "${STT_MODEL_FILE}" \
+        --threads 4 \
+        >"${STT_LOG_FILE}" 2>&1 &
+    echo "$!" >"${STT_PID_FILE}"
+    log "whisper-server pid $!"
+
+    # 7. Spawn wagner-tts-sidecar (TTS) in the background.
+    log "spawning wagner-tts-sidecar → :${TTS_PORT}"
+    "${TTS_BIN}" \
+        --port "${TTS_PORT}" \
+        --model "${TTS_MODEL_FILE}" \
+        --voices "${TTS_VOICES_FILE}" \
+        >"${TTS_LOG_FILE}" 2>&1 &
+    echo "$!" >"${TTS_PID_FILE}"
+    log "wagner-tts-sidecar pid $!"
+
+    # 8. Wait for readiness.
+    wait_http_health "whisper-server" "${STT_PORT}" "${STT_PID_FILE}"
+    wait_port        "wagner-tts-sidecar" "${TTS_PORT}" "${TTS_PID_FILE}"
+
+    log "both sidecars up. run: make voice-e2e"
 }
+
+# ---------------------------------------------------------------------------
+# stop
+# ---------------------------------------------------------------------------
 
 stop() {
-  docker rm -f "$STT_NAME" "$TTS_NAME" >/dev/null 2>&1 || true
-  err "stopped + removed $STT_NAME / $TTS_NAME"
+    kill_pid_file "whisper-server"      "${STT_PID_FILE}"
+    kill_pid_file "wagner-tts-sidecar"  "${TTS_PID_FILE}"
+    log "sidecars stopped"
 }
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
 
 status() {
-  docker ps -a --filter "name=${STT_NAME}" --filter "name=${TTS_NAME}" \
-    --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+    local stt_pid tts_pid
+    stt_pid="$(read_pid "${STT_PID_FILE}")" || true
+    tts_pid="$(read_pid "${TTS_PID_FILE}")" || true
+
+    if [[ -n "${stt_pid}" ]]; then
+        echo "whisper-server        running  pid=${stt_pid}  :${STT_PORT}"
+    else
+        echo "whisper-server        stopped"
+    fi
+
+    if [[ -n "${tts_pid}" ]]; then
+        echo "wagner-tts-sidecar    running  pid=${tts_pid}  :${TTS_PORT}"
+    else
+        echo "wagner-tts-sidecar    stopped"
+    fi
 }
 
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
 case "${1:-start}" in
-  start) start ;;
-  stop) stop ;;
-  status) status ;;
-  *) err "usage: $0 {start|stop|status}"; exit 2 ;;
+    start)  start  ;;
+    stop)   stop   ;;
+    status) status ;;
+    *) log "usage: $0 {start|stop|status}"; exit 2 ;;
 esac

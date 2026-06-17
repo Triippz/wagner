@@ -5,7 +5,7 @@ CARGO_EDGE_HOST := -p wagner-edge-host
 
 .PHONY: dev cargo clippy e2e ts arch typecheck hub hub-e2e verify accept \
 	edge edge-build edge-ui shell dev-setup docker-hub sync-e2e voice-e2e \
-	gui-smoke voice-up voice-down
+	gui-smoke voice-up voice-down run down
 
 # Launch the live MV hub (Deno + Hono): OIDC + ephemeral discovery (long-running).
 dev:
@@ -89,17 +89,52 @@ docker-hub:
 sync-e2e:
 	cargo test -p wagner-edge-host --test vault_sync_n0_e2e -- --ignored --nocapture
 
-# Start/stop the STT+TTS sidecars (Docker) that voice-e2e expects on :8771/:8772.
+# Start/stop the STT+TTS native sidecars on :8771/:8772.
+# Downloads models on first run (~165 MB total into ~/.cache/wagner-voice/models/).
+# Builds the TTS sidecar binary if it doesn't exist yet.
 voice-up:
 	bash scripts/voice-sidecars.sh start
 voice-down:
 	bash scripts/voice-sidecars.sh stop
 
-# Real-sidecar voice smoke tests — requires faster-whisper-server on :8771
-# and Kokoro-FastAPI on :8772 (run `make voice-up` first). Not part of
+# Real-sidecar voice smoke tests — requires whisper-server on :8771
+# and wagner-tts-sidecar on :8772 (run `make voice-up` first). Not part of
 # `make verify` (marked #[ignore]).
 voice-e2e:
 	cargo test -p wagner-edge-host --test http_voice_engines -- --ignored --nocapture
+
+# ---------------------------------------------------------------------------
+# One-command dev stack: hub + voice + edge
+# ---------------------------------------------------------------------------
+#
+# `make run`: boots all three layers for a full local session.
+#   1. Hub (cd hub && deno task dev) — backgrounded, logs to /tmp/wagner-hub.log
+#   2. Voice sidecars (native launcher) — downloads models on first run
+#   3. Edge desktop app (make edge) — foreground (blocking)
+#
+# `make down`: stops the backgrounded hub and voice sidecars cleanly.
+#   (The edge app is foreground — quit it with Ctrl-C or close the window.)
+
+run:
+	@echo "[wagner] starting hub (background)…"
+	@cd hub && deno task dev >/tmp/wagner-hub.log 2>&1 & echo "$$!" >/tmp/wagner-hub.pid
+	@echo "[wagner] hub pid $$(cat /tmp/wagner-hub.pid) — logs: /tmp/wagner-hub.log"
+	@echo "[wagner] starting voice sidecars…"
+	bash scripts/voice-sidecars.sh start
+	@echo "[wagner] launching edge app (foreground — quit to stop)…"
+	$(MAKE) edge
+
+down:
+	@echo "[wagner] stopping voice sidecars…"
+	bash scripts/voice-sidecars.sh stop
+	@echo "[wagner] stopping hub…"
+	@if [ -f /tmp/wagner-hub.pid ]; then \
+	    pid=$$(cat /tmp/wagner-hub.pid); \
+	    kill "$$pid" 2>/dev/null && echo "[wagner] hub (pid $$pid) stopped" || echo "[wagner] hub already stopped"; \
+	    rm -f /tmp/wagner-hub.pid; \
+	else \
+	    echo "[wagner] no hub PID file found"; \
+	fi
 
 # Full pre-merge gate: clippy → cargo → shell → typecheck → ts →
 # edge-frontend build → hub.

@@ -1,17 +1,20 @@
-//! HTTP adapter for Kokoro-FastAPI — implements the `Tts` trait by calling the
-//! OpenAI-compatible `POST /v1/audio/speech` endpoint.
+//! HTTP adapter for the `wagner-tts-sidecar` — implements the `Tts` trait by
+//! calling the OpenAI-compatible `POST /v1/audio/speech` endpoint.
 //!
 //! The adapter is deliberately thin: it translates between the Wagner domain
 //! types (`SpeechChunk`, `VoiceError`) and the HTTP wire format. All engine
-//! lifecycle is out of scope; the operator runs the Kokoro sidecar independently.
+//! lifecycle is out of scope; the caller runs the sidecar independently.
 //!
-//! # Wire format (Kokoro-FastAPI)
+//! # Wire format (wagner-tts-sidecar)
 //!
 //! Request: `POST {base_url}/v1/audio/speech`
 //! Content-Type: `application/json`
 //! Body: `{"model":"kokoro","input":"<text>","voice":"af_bella"}`
 //!
-//! Response (HTTP 200): raw audio bytes (`audio/mpeg` or similar)
+//! Response (HTTP 200): raw WAV bytes (`audio/wav`)
+//!
+//! The adapter reads raw bytes (`.bytes()`) regardless of Content-Type, so it
+//! works with any audio format the sidecar may produce.
 //!
 //! Non-2xx, empty body, or network failure → `VoiceError::TtsFailed(...)`.
 

@@ -158,7 +158,9 @@ injected into the container. No secrets are baked into the image.
 ## Makefile quick reference
 
 ```
-make dev         # hub dev server (hot-reload)
+make run         # start hub + voice + edge (one-command dev stack)
+make down        # stop background hub + voice sidecars
+make dev         # hub dev server only (hot-reload)
 make edge        # build edge UI → launch Tauri desktop app
 make hub         # hub unit + contract tests
 make hub-e2e     # hub E2E server tests
@@ -171,8 +173,8 @@ make edge-ui     # headless browser smoke test
 make docker-hub  # build hub image + docker compose up
 make dev-setup   # verify toolchain prerequisites
 make verify      # full pre-merge gate
-make voice-up    # start STT+TTS sidecars (Docker) on :8771/:8772
-make voice-down  # stop the voice sidecars
+make voice-up    # start STT+TTS native sidecars on :8771/:8772
+make voice-down  # stop the native voice sidecars
 make voice-e2e   # real-sidecar voice smoke tests (needs voice-up first)
 ```
 
@@ -199,43 +201,83 @@ wagner/
 
 ---
 
-## Voice sidecars (STT + TTS)
+## Voice sidecars (STT + TTS) — native engines
 
 The voice pillar's `HttpStt` / `HttpTts` adapters call two OpenAI-compatible
-HTTP services. `make voice-e2e` (and live voice in the app) need them running:
+HTTP services on loopback. Both are native binaries — no Docker required.
 
-| Service | Port | Image | Endpoint |
-|---------|------|-------|----------|
-| STT | 8771 | `fedirz/faster-whisper-server:latest-cpu` | `POST /v1/audio/transcriptions` |
-| TTS | 8772 | `ghcr.io/remsky/kokoro-fastapi-cpu:latest` | `POST /v1/audio/speech` |
+| Service | Port | Binary | Endpoint |
+|---------|------|--------|----------|
+| STT | 8771 | `whisper-server` (whisper.cpp, `brew install whisper-cpp`) | `POST /v1/audio/transcriptions` |
+| TTS | 8772 | `wagner-tts-sidecar` (built from `edge/tts-sidecar` in this repo) | `POST /v1/audio/speech` |
+
+### Quick start
 
 ```bash
-make voice-up      # pull (first run) + start both containers, wait until ready
+make voice-up      # download models if missing → build TTS sidecar if missing → spawn both
 make voice-e2e     # run the #[ignore] real-sidecar smoke tests
-make voice-down    # stop + remove both containers
+make voice-down    # stop both sidecars
 ```
 
-Models download on first use into Docker named volumes (`wagner-stt-cache`,
-`wagner-tts-cache`) and are cached across restarts. The launcher is
-`scripts/voice-sidecars.sh` (`start`/`stop`/`status`); swap the image tags there
-if upstream moves.
+### Model cache
 
-**Note on `make voice-e2e`:** the smoke tests assert *no panic*, not a specific
-transcript — `stt_real_sidecar` feeds synthetic silence (raw PCM, no WAV
-container), which faster-whisper rejects with HTTP 500, and the test tolerates
-that. The production path (real captured WAV audio) works end-to-end; verify
-with a real clip:
+On first run, `make voice-up` downloads the models into
+`~/.cache/wagner-voice/models/` (≈ 165 MB total, cached across restarts):
+
+| File | Size | Source |
+|------|------|--------|
+| `ggml-tiny.en.bin` | 74 MB | `ggerganov/whisper.cpp` on Hugging Face |
+| `model_quantized.onnx` | 88 MB | `onnx-community/Kokoro-82M-v1.0-ONNX` on Hugging Face |
+| `voices-v1.0.bin` | 27 MB | `thewh1teagle/kokoro-onnx` GitHub releases |
+
+Override the cache root with `WAGNER_VOICE_HOME=/your/path make voice-up`.
+
+### Prerequisites
+
+- `brew install whisper-cpp` (provides `whisper-server` on your PATH).
+- Rust toolchain (already required for `cargo` targets) — the TTS sidecar
+  builds automatically the first time `make voice-up` runs.
+
+### Round-trip verification
 
 ```bash
-# synthesize, then transcribe it back
+make voice-up
+
+# synthesize text → WAV
 curl -s -X POST http://127.0.0.1:8772/v1/audio/speech \
   -H 'Content-Type: application/json' \
-  -d '{"model":"kokoro","input":"hello from Wagner","voice":"af_bella","response_format":"wav"}' \
+  -d '{"model":"kokoro","input":"hello from Wagner","voice":"af_bella"}' \
   -o /tmp/s.wav
+
+# transcribe the WAV back
 curl -s -X POST http://127.0.0.1:8771/v1/audio/transcriptions \
   -F 'file=@/tmp/s.wav;type=audio/wav' -F 'model=whisper-1'
 # → {"text":"Hello from Wagner."}
+
+make voice-down
 ```
+
+**Note on `make voice-e2e`:** the smoke tests assert *no panic*, not a specific
+transcript — `stt_real_sidecar` feeds synthetic silence which whisper rejects
+with an error, and the test tolerates that. The round-trip above proves the
+full pipeline with real audio.
+
+---
+
+## One-command dev stack
+
+`make run` boots all three layers (hub + voice + edge) with a single command:
+
+```bash
+make run    # starts hub + voice sidecars, then launches the edge app (foreground)
+make down   # stops the backgrounded hub + voice sidecars
+```
+
+The edge app launches in the foreground (blocking). When you are done, quit the
+app window (or Ctrl-C), then run `make down` to stop the background services.
+
+The hub logs to `/tmp/wagner-hub.log`. Voice sidecar logs land in
+`~/.cache/wagner-voice/run/stt.log` and `~/.cache/wagner-voice/run/tts.log`.
 
 ---
 
