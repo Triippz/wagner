@@ -7,7 +7,7 @@
 >
 > (Not to be confused with `CONTEXT.md` — that's the domain glossary.)
 
-Last updated: 2026-06-17 (autonomous build kickoff)
+Last updated: 2026-06-17 (post-sync integration; Phase 6 Hub next)
 
 ## Mission
 
@@ -25,16 +25,13 @@ IN FLIGHT (integrate when they report green — `git merge lane/<name>` then
   `240089fa`; vault_graph IPC + React Flow + view-rail Console/Vault tab;
   verify+accept green).
 - `lane/sync` — Phase 5 distributed sync (loro+iroh+projector), built per
-  specs/006 (opus). DONE on `lane/sync`, NOT yet integrated. Files: NEW
-  `edge/host/src/vault/{crdt,projector,sync_adapter,snapshot_store}.rs` (clean) +
-  CONFLICTS in `vault/mod.rs` + `vault/linker.rs` (it added rewrite_wikilinks on
-  a base without my parse_wikilinks — keep BOTH) + Cargo deps. Deps: loro=1.13.1,
-  notify 8, notify-debouncer-mini, similar 2, sha2, uuid(v4) [workspace];
-  iroh-gossip/iroh-docs 0.101.0 as DIRECT edge/host deps (iroh="1" workspace conflict).
+  specs/006 (opus). INTEGRATED ✓ (fast-forward into feat/autonomous-build; commit
+  `9373b48`; vault/{crdt,projector,sync_adapter,snapshot_store}.rs + linker rewrite;
+  6 unit tests green; verify+accept green).
 - IMPORTANT LESSON: worktree lanes branch from base `82990fc`, NOT the build
   branch — integrate via merge-with-conflict-resolution, keeping current code +
   adding the lane's new feature. See `memory/007-worktree-lane-integration`.
-- NEXT after sync integrates: build Hub (008, depends on sync traits); broaden E2E.
+- NEXT: build Hub (008, depends on sync traits); broaden E2E.
 
 Wagner = a distributed engineering platform: run autonomous coding agents and
 accumulate what they learn into a shared, living knowledge base. **Edge executes,
@@ -88,43 +85,38 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 - [x] **Voice** (`specs/007-voice`): COMPLETE (merged from lane/voice).
 - [x] **Devex/Docker/E2E**: hub Dockerfile + compose, `make hub-e2e` (7 tests),
       `docs/development.md`, `make dev-setup`/`docker-hub` (merged from lane/devex).
-- [ ] **Phase 4 — Graph + Vault browser** (`specs/005-graph-view`): React Flow
-      over the vault (`@xyflow/react` to add). Depends on Phase 3.
-- [ ] **Phase 5 — Distributed sync v1** (`specs/006-sync`): loro per-note + iroh
-      gossip/docs + the file↔CRDT projector (highest risk). Depends on Phase 3.
+- [x] **Phase 4 — Graph + Vault browser** (`specs/005-graph-view`): React Flow
+      over the vault. INTEGRATED ✓ (merged from lane/graph; vault_graph IPC +
+      React Flow + VaultPanel; verify+accept green).
+- [x] **Phase 5 — Distributed sync v1** (`specs/006-sync`): loro per-note + iroh
+      gossip/docs + the file↔CRDT projector. INTEGRATED ✓ (merged from lane/sync;
+      VaultCrdt, projector, sync_adapter, snapshot_store, wikilink rewrite; 6 unit
+      tests; verify+accept green).
 - [ ] **Phase 6 — Hub vault store + multi-teammate sync + presence**.
 - [ ] **Voice** (`specs/007-voice`): faster-whisper STT + Kokoro TTS, `voice/`
       seam. Fully parallel (handoff §7).
 
 ## Current position
 
-**Plan 003 (Sessions, Phases 0–2) COMPLETE** — 10 steps committed on
-`feat/autonomous-build`, `make accept` green. Foundation (Phase A) + Plans 004
-(Vault) & 007 (Voice) authored.
+**Phases 0–5 COMPLETE** — all committed on `feat/autonomous-build`, `make accept`
+green. Foundation, Sessions (003), Vault v1 (004), Graph (005), Sync (006), Voice
+(007), Devex/Docker/hub-E2E all merged and verified.
 
 **DONE:** Foundation, Sessions (003), Vault v1 (004), Voice (007), Devex/Docker/
-hub-E2E. All merged into `feat/autonomous-build`; `make verify` + `make hub-e2e`
-green.
+hub-E2E, Graph/Vault browser (005), Distributed sync v1 (006). All on
+`feat/autonomous-build`; `make verify` + `make hub-e2e` + `make accept` green.
 
 **Next, in roadmap order:**
-1. **Phase 4 — Graph view + Vault browser** (`specs/005-graph-view`, to author):
-   add `@xyflow/react` to `edge/ui`; a graph IPC that returns nodes/edges from the
-   vault (uses `related_by_bfs` + relationship/backlink tables — may need a new
-   `vault_graph(project_dir)` command); React Flow component (nodes=notes colored
-   by tier/lifecycle, edges=typed relationships); a vault browser panel + a
-   staging-approval UI (uses list_staging/approve_staging). UI-heavy → parallel-able.
-2. **Phase 5 — Distributed sync v1** (`specs/006-sync`, to author): loro per-note
-   + iroh gossip/docs + the file↔CRDT projector (HIGHEST RISK — `docs/wagner-
-   vision-and-architecture.md` §5/§9). Do in the main loop with heavy tests; ride
-   the existing `edge/host/src/remote/` iroh seam. Add loro + iroh deps.
-3. **Phase 6 — Hub vault store + multi-teammate sync + presence** (hub/ Deno).
-4. Expand the UI journey to cover session rail/resume/add-goal/multi-session and
+1. **Phase 6 — Hub vault store + multi-teammate sync + presence** (`specs/008-hub`,
+   plan already authored). Deno hub: vault REST endpoints, SyncAdapter over WebSocket,
+   snapshot store backed by SQLite/KV, presence broadcast. Depends on sync traits
+   from Phase 5 (✓ available). See `specs/008-hub/plan.md`.
+2. Expand the UI journey to cover session rail/resume/add-goal/multi-session and
    vault browser (E2E breadth).
 
-**Resume protocol:** `git log --oneline -40` shows every step (prefixed
-`feat: [sessions|vault|voice] …`, `merge: [voice|devex] …`). Re-run `make verify`
+**Resume protocol:** `git log --oneline -40` shows every step. Re-run `make verify`
 (+ `make hub-e2e`, `make accept`), then continue at the first unbuilt item above.
-Plans live in `specs/NNN-*/plan.md`. 005/006 plans must be authored before build.
+Plans live in `specs/NNN-*/plan.md`.
 
 ## How to resume after a compaction
 
