@@ -58,9 +58,13 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
       All 10 steps committed; `make accept` green. Entry redesign (folder picker
       + goal), Run-as-session fields, RunManager map, run_id-keyed reducer +
       selectors, resume/list/get/add_goal IPC, ipc.ts fix, session rail.
-- [ ] **Phase 3 — Vault v1** (`specs/004-vault-v1`): wikilinks + typed
-      relationships + backlinks over `.wagner/memory`, deterministic linker.
-      Extends `edge/host/src/memory.rs`. Parallel-capable.
+- [~] **Phase 3 — Vault v1** (`specs/004-vault-v1`): IN PROGRESS. Step 1 DONE
+      (`03fbde4` — note frontmatter summary/tier/lifecycle/provenance scalars on
+      MemoryRecord, projected when set). Next: Step 2 (deterministic `[[wikilink]]`
+      parser in new `edge/host/src/vault/linker.rs`). Steps 3–8 per the plan.
+      NOTE: SurrealDB 2.x rejects enums/Option/nested → persisted fields are plain
+      scalars; typed relationships go in a separate table (Step 3), not on
+      MemoryRecord.
 - [ ] **Phase 4 — Graph + Vault browser** (`specs/005-graph-view`): React Flow
       over the vault (`@xyflow/react` to add). Depends on Phase 3.
 - [ ] **Phase 5 — Distributed sync v1** (`specs/006-sync`): loro per-note + iroh
@@ -75,17 +79,20 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 `feat/autonomous-build`, `make accept` green. Foundation (Phase A) + Plans 004
 (Vault) & 007 (Voice) authored.
 
-**Next: Plan 004 — Vault v1** (`specs/004-vault-v1/plan.md`), engine-side,
-extends `edge/host/src/memory.rs`. TDD steps 1→8. Then Plan 005 (Graph, needs
-React Flow), Plan 006 (Sync, hard), Plan 007 (Voice, parallel).
+**Now building: Plan 004 — Vault v1.** Step 1 committed (`03fbde4`). Next is
+Step 2 (wikilink parser → new `edge/host/src/vault/linker.rs`; create the
+`vault` module + `pub mod vault;` in `edge/host/src/lib.rs`; parse `[[Name]]` and
+`[[actual|alias]]`, skip code fences/inline code — pulldown-cmark or a careful
+std scanner). Then steps 3–8, then Plan 005 (Graph, needs React Flow `@xyflow/
+react`), Plan 006 (Sync, hard), Plan 007 (Voice, parallel).
 
-**Resume protocol:** `git log --oneline -20` shows every committed step. Each 003
-step is one commit (`feat: [sessions] 003 step N`). Re-run `make verify` to
-confirm green, then start Plan 004 Step 1 (NoteMetadata frontmatter upgrade).
+**Resume protocol:** `git log --oneline -25` shows every committed step (one per
+commit, prefixed `feat: [sessions] 003 step N` / `feat: [vault] 004 step N`).
+Re-run `make verify`, then continue at the first unbuilt step named above.
 
-Commit history (003): step1 `af9d9d5`, step2 `3ae100b`, step3 `6b7a106`,
-step4 `5e3880c`, step5 `61356b9`, step6 `5066d98`, steps7-8 `f14d6f5`,
-step9 `76ee180`, step10 `0164ce7`.
+Commit map — 003: step1 `af9d9d5`, step2 `3ae100b`, step3 `6b7a106`, step4
+`5e3880c`, step5 `61356b9`, step6 `5066d98`, steps7-8 `f14d6f5`, step9 `76ee180`,
+step10 `0164ce7`. 004: step1 `03fbde4`.
 
 ## How to resume after a compaction
 
