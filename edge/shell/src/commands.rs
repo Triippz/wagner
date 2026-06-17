@@ -967,6 +967,64 @@ impl From<wagner_edge_host::voice::VoiceStatus> for VoiceStatusDto {
     }
 }
 
+/// Per-model group state returned by `voice_models_status`.
+///
+/// Each field is the lowercase state string: `"absent"` | `"ready"`.
+/// Matches the `state` values emitted on `wagner://voice-download`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoiceModelsDto {
+    pub stt: String,
+    pub tts: String,
+}
+
+/// Resolve the models directory under the app-data dir.
+fn models_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("models"))
+        .map_err(|e| format!("could not resolve app-data dir: {e}"))
+}
+
+/// Return the current on-disk state of the voice model files.
+///
+/// IPC contract: `voice_models_status() -> { stt: string, tts: string }`
+/// where each string is one of: `"absent"` | `"ready"`.
+#[tauri::command]
+pub fn voice_models_status(app: AppHandle) -> Result<VoiceModelsDto, String> {
+    let dir = models_dir(&app)?;
+    let s = wagner_edge_host::voice::models_status(&dir);
+    Ok(VoiceModelsDto { stt: s.stt, tts: s.tts })
+}
+
+/// Download all voice model files into the app-data models dir, emitting
+/// progress on the `wagner://voice-download` Tauri event channel.
+///
+/// IPC contract: `voice_download_models() -> void`
+///
+/// Event payload shape (matches the UI lane contract):
+/// ```json
+/// { "model": "stt"|"tts_model"|"tts_voices",
+///   "state": "downloading"|"verifying"|"ready"|"failed",
+///   "received": u64,
+///   "total": u64 }
+/// ```
+#[tauri::command]
+pub async fn voice_download_models(app: AppHandle) -> Result<(), String> {
+    let dir = models_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create models dir: {e}"))?;
+
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("could not build HTTP client: {e}"))?;
+
+    let app_for_emit = app.clone();
+    wagner_edge_host::voice::download_models(&dir, &client, move |progress| {
+        let _ = app_for_emit.emit("wagner://voice-download", &progress);
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Return the current voice-feature state.
 ///
 /// IPC contract: `voice_status() -> { enabled: bool, ready: bool }`
@@ -981,9 +1039,13 @@ pub fn voice_status(
 ///
 /// IPC contract: `voice_set_enabled(on: bool) -> { enabled: bool, ready: bool }`
 ///
-/// When `on = true` the shell spawns the STT and TTS sidecars, waits for each
-/// `/health` endpoint, and marks the manager `ready`. When `on = false` the
-/// sidecars are killed and `ready` is cleared.
+/// When `on = true` the shell spawns the STT and TTS sidecars (passing the
+/// app-data model paths as CLI arguments), waits for each `/health` endpoint,
+/// and marks the manager `ready`. Returns an error containing
+/// `"models not ready"` when any model file is absent — the UI should call
+/// `voice_download_models` first.
+///
+/// When `on = false` the sidecars are killed and `ready` is cleared.
 ///
 /// Idempotent: enabling when already up returns the current status without
 /// re-spawning. Spawn / health-wait failure returns a typed `Err(String)` and
@@ -1000,11 +1062,21 @@ pub async fn voice_set_enabled(
         if vm.status().enabled && vm.status().ready {
             return Ok(vm.status().into());
         }
+
+        // Gate: all model files must be present before spawning sidecars.
+        let dir = models_dir(&app)?;
+        if !wagner_edge_host::voice::all_models_ready(&dir) {
+            return Err("models not ready — call voice_download_models first".into());
+        }
+
         // Mark enabled now so the UI reflects "starting" even before ready.
         vm.set_enabled(true);
 
+        // Resolve model paths from the app-data models dir.
+        let paths = crate::voice_lifecycle::ModelPaths::from_dir(&dir);
+
         // Spawn sidecars and wait for health.
-        match crate::voice_lifecycle::spawn_sidecars(&app, &sc).await {
+        match crate::voice_lifecycle::spawn_sidecars(&app, &sc, &paths).await {
             Ok(()) => {
                 vm.set_ready(true);
             }

@@ -119,6 +119,11 @@ path = "tests/voice_pipeline.rs"
 name = "http_voice_engines"
 path = "tests/http_voice_engines.rs"
 
+# Voice pillar (step 7) — model download manager unit tests.
+[[test]]
+name = "voice_models"
+path = "tests/voice_models.rs"
+
 # 006 — vault sync unit tests
 [[test]]
 name = "vault_crdt_init"

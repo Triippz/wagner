@@ -46,7 +46,31 @@ impl Default for SidecarState {
     }
 }
 
+/// Resolved paths to the voice model files on disk.
+pub struct ModelPaths {
+    /// `ggml-tiny.en.bin` — the STT model.
+    pub stt: std::path::PathBuf,
+    /// `model_quantized.onnx` — the Kokoro ONNX model.
+    pub tts_model: std::path::PathBuf,
+    /// `voices-v1.0.bin` — the Kokoro voices blob.
+    pub tts_voices: std::path::PathBuf,
+}
+
+impl ModelPaths {
+    /// Resolve model paths from the app-data models dir.
+    pub fn from_dir(dir: &std::path::Path) -> Self {
+        Self {
+            stt: dir.join("ggml-tiny.en.bin"),
+            tts_model: dir.join("model_quantized.onnx"),
+            tts_voices: dir.join("voices-v1.0.bin"),
+        }
+    }
+}
+
 /// Spawn both sidecars and wait until each `/health` endpoint responds 200.
+///
+/// `paths` — resolved model file locations under app-data. These are passed
+/// as CLI arguments to the sidecar binaries.
 ///
 /// Returns `Ok(())` when both are up and healthy.
 /// Returns `Err(String)` on any spawn or health-wait failure (Article III:
@@ -54,6 +78,7 @@ impl Default for SidecarState {
 pub async fn spawn_sidecars(
     app: &AppHandle,
     sc: &tauri::State<'_, SidecarState>,
+    paths: &ModelPaths,
 ) -> Result<(), String> {
     let shell = app.shell();
 
@@ -65,6 +90,7 @@ pub async fn spawn_sidecars(
             "--host", "127.0.0.1",
             "--port", "8771",
             "--inference-path", "/v1/audio/transcriptions",
+            "--model", &paths.stt.to_string_lossy(),
         ])
         .spawn()
         .map_err(|e| format!("failed to spawn whisper-server: {e}"))?;
@@ -73,7 +99,12 @@ pub async fn spawn_sidecars(
     let (_tts_rx, tts_child): (tauri::async_runtime::Receiver<CommandEvent>, CommandChild) = shell
         .sidecar("wagner-tts-sidecar")
         .map_err(|e| format!("failed to create wagner-tts-sidecar command: {e}"))?
-        .args(["--host", "127.0.0.1", "--port", "8772"])
+        .args([
+            "--host", "127.0.0.1",
+            "--port", "8772",
+            "--model", &paths.tts_model.to_string_lossy(),
+            "--voices", &paths.tts_voices.to_string_lossy(),
+        ])
         .spawn()
         .map_err(|e| format!("failed to spawn wagner-tts-sidecar: {e}"))?;
 

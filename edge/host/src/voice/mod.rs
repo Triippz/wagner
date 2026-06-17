@@ -41,6 +41,7 @@
 pub mod http_stt;
 pub mod http_tts;
 pub mod manager;
+pub mod models;
 pub mod pipeline;
 pub mod router;
 pub mod stt;
@@ -58,3 +59,9 @@ pub use types::{AudioChunk, SpeechChunk, Transcript, VoiceError};
 
 // VoiceManager and VoiceStatus re-exported at voice:: level for the shell layer.
 pub use manager::{VoiceManager, VoiceStatus};
+
+// Models download manager re-exported for the shell layer.
+pub use models::{
+    all_models_ready, download_models, models_status, ModelError, ModelProgress, ModelState,
+    ModelsStatus, MODELS,
+};

@@ -87,6 +87,8 @@ pub fn run() {
             commands::vault_graph,
             commands::voice_status,
             commands::voice_set_enabled,
+            commands::voice_models_status,
+            commands::voice_download_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running wagner-edge-shell");
