@@ -12,6 +12,14 @@ import { listen } from "@tauri-apps/api/event";
 import type { TauriBridge } from "../transport/ipc";
 import type { RunSnapshot, RunStatus } from "../store/types";
 
+/** A tiered vault-retrieval hit (mirrors host `TieredResultDto`). */
+export interface TieredResultDto {
+  uid: string;
+  summary: string;
+  snippet: string;
+  tier_kind: "summary" | "section" | "full" | "related";
+}
+
 /** Lightweight session summary for the rail (mirrors host `RunSummary`). */
 export interface RunSummary {
   run_id: string;
@@ -82,6 +90,15 @@ export const cmd = {
   /** Add a goal to a session: injected live, or persisted + resumed if closed. */
   addGoal: (runId: string, text: string) =>
     invoke<void>("add_goal", { runId, text }),
+  /** Tiered vault retrieval for a project (summary→section→full→related). */
+  vaultSummary: (projectDir: string, query: string) =>
+    invoke<TieredResultDto[]>("vault_summary", { projectDir, query }),
+  /** Promote a staged vault note to the curated dir. */
+  approveStaging: (projectDir: string, uid: string) =>
+    invoke<void>("approve_staging", { projectDir, uid }),
+  /** Uids of vault notes awaiting approval. */
+  listStaging: (projectDir: string) =>
+    invoke<string[]>("list_staging", { projectDir }),
   answerTransmission: (id: string, response: string) =>
     invoke<void>("answer_transmission", { id, response }),
 };

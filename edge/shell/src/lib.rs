@@ -77,6 +77,9 @@ pub fn run() {
             commands::get_run,
             commands::resume_run,
             commands::add_goal,
+            commands::vault_summary,
+            commands::approve_staging,
+            commands::list_staging,
         ])
         .run(tauri::generate_context!())
         .expect("error while running wagner-edge-shell");

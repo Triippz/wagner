@@ -73,6 +73,16 @@ impl TieredResult {
             | TieredResult::Related(r) => r,
         }
     }
+
+    /// The tier this hit matched at, as a stable wire string.
+    pub fn tier_kind(&self) -> &'static str {
+        match self {
+            TieredResult::Summary(_) => "summary",
+            TieredResult::Section(_) => "section",
+            TieredResult::Full(_) => "full",
+            TieredResult::Related(_) => "related",
+        }
+    }
 }
 
 /// A stored learning. `uid` is our own ULID (not the Surreal RecordId) so records

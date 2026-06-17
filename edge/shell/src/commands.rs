@@ -831,6 +831,64 @@ pub fn list_runs(app: AppHandle) -> Result<Vec<wagner_edge_host::state::RunSumma
     wagner_edge_host::state::list_summaries(&runs_root).map_err(|e| e.to_string())
 }
 
+/// A tiered-retrieval hit, flattened for the frontend (Plan 004 step 8).
+#[derive(serde::Serialize)]
+pub struct TieredResultDto {
+    pub uid: String,
+    pub summary: String,
+    pub snippet: String,
+    pub tier_kind: String,
+}
+
+fn tiered_dto(hit: &wagner_edge_host::memory::TieredResult) -> TieredResultDto {
+    let rec = hit.record();
+    TieredResultDto {
+        uid: rec.uid.clone(),
+        summary: rec.summary.clone(),
+        snippet: rec.text.chars().take(160).collect(),
+        tier_kind: hit.tier_kind().to_string(),
+    }
+}
+
+/// Tiered vault retrieval for a project — summary → section → full → related.
+#[tauri::command]
+pub async fn vault_summary(
+    store: State<'_, MemoryStore>,
+    project_dir: String,
+    query: String,
+) -> Result<Vec<TieredResultDto>, String> {
+    let hits = store
+        .tiered_query(wagner_edge_host::memory::TieredQuery {
+            project_id: &project_dir,
+            terms: &query,
+            limit: 20,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(hits.iter().map(tiered_dto).collect())
+}
+
+/// Approve a staged vault note (move it from `_staging/` to the curated dir).
+#[tauri::command]
+pub async fn approve_staging(
+    store: State<'_, MemoryStore>,
+    project_dir: String,
+    uid: String,
+) -> Result<(), String> {
+    let dir = resolve_project_dir(&project_dir, std::path::PathBuf::from("."))?;
+    store
+        .approve_staging_note(&uid, &dir)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The uids of vault notes awaiting approval in `_staging/`.
+#[tauri::command]
+pub fn list_staging(store: State<'_, MemoryStore>, project_dir: String) -> Result<Vec<String>, String> {
+    let dir = resolve_project_dir(&project_dir, std::path::PathBuf::from("."))?;
+    Ok(store.list_staging(&dir))
+}
+
 /// Load one persisted run's full state (reopening a session from the rail).
 #[tauri::command]
 pub fn get_run(app: AppHandle, run_id: String) -> Result<Run, String> {
@@ -914,6 +972,24 @@ mod tests {
         let resumed = prepare_resumed(run);
         assert_eq!(resumed.status, RunStatus::Running);
         assert_eq!(resumed.halt_reason, None);
+    }
+
+    #[test]
+    fn tiered_dto_carries_kind_and_fields() {
+        use super::tiered_dto;
+        use wagner_edge_host::memory::{MemoryRecord, TieredResult};
+        let rec = MemoryRecord {
+            uid: "01X".into(),
+            summary: "short".into(),
+            text: "a longer body of text".into(),
+            ..Default::default()
+        };
+        let dto = tiered_dto(&TieredResult::Related(rec.clone()));
+        assert_eq!(dto.uid, "01X");
+        assert_eq!(dto.tier_kind, "related");
+        assert_eq!(dto.summary, "short");
+        let dto2 = tiered_dto(&TieredResult::Summary(rec));
+        assert_eq!(dto2.tier_kind, "summary");
     }
 
     #[test]
