@@ -21,15 +21,20 @@ defaults, recorded in `memory/`.
 INTEGRATED ✓: `lane/voice` (Voice pillar), `lane/devex` (Docker + hub E2E + docs).
 IN FLIGHT (integrate when they report green — `git merge lane/<name>` then
 `make verify`/`make accept`):
-- `lane/graph` — Phase 4 Graph view + Vault browser (vault_graph IPC + React Flow
-  `@xyflow/react` + VaultGraph/VaultBrowser + staging approval UI + specs/005).
-  Touches edge/host/src/memory.rs, edge/shell/src/commands.rs+lib.rs, edge/ui/**.
-- `lane/sync` — Phase 5 distributed sync (loro+iroh+projector) per specs/006-sync
-  (opus). NEW module (sync/crdt) + Cargo deps + lib.rs. Highest risk.
-- Sync/Hub plans authored ✓ (`specs/006-sync/plan.md`, `specs/008-hub-vault/plan.md`).
-- INTEGRATION ORDER when they report: merge `lane/graph` first, then `lane/sync`
-  (resolve lib.rs invoke_handler + Cargo.toml overlaps — both additive). Then
-  build Hub (008) — depends on sync traits. Then broaden the E2E journey.
+- `lane/graph` — Phase 4 Graph view + Vault browser. INTEGRATED ✓ (merge
+  `240089fa`; vault_graph IPC + React Flow + view-rail Console/Vault tab;
+  verify+accept green).
+- `lane/sync` — Phase 5 distributed sync (loro+iroh+projector), built per
+  specs/006 (opus). DONE on `lane/sync`, NOT yet integrated. Files: NEW
+  `edge/host/src/vault/{crdt,projector,sync_adapter,snapshot_store}.rs` (clean) +
+  CONFLICTS in `vault/mod.rs` + `vault/linker.rs` (it added rewrite_wikilinks on
+  a base without my parse_wikilinks — keep BOTH) + Cargo deps. Deps: loro=1.13.1,
+  notify 8, notify-debouncer-mini, similar 2, sha2, uuid(v4) [workspace];
+  iroh-gossip/iroh-docs 0.101.0 as DIRECT edge/host deps (iroh="1" workspace conflict).
+- IMPORTANT LESSON: worktree lanes branch from base `82990fc`, NOT the build
+  branch — integrate via merge-with-conflict-resolution, keeping current code +
+  adding the lane's new feature. See `memory/007-worktree-lane-integration`.
+- NEXT after sync integrates: build Hub (008, depends on sync traits); broaden E2E.
 
 Wagner = a distributed engineering platform: run autonomous coding agents and
 accumulate what they learn into a shared, living knowledge base. **Edge executes,

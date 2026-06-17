@@ -19,6 +19,7 @@ The live build state lives in `../build-context.md`.
 - [[004-roadmap-and-parallelization]] — phase DAG and which lanes run in parallel.
 - [[005-repo-commit-hooks]] — git hook constraints; commits land on feat/autonomous-build.
 - [[006-resume-defaults]] — resume_run uses default roster/no suite (not persisted on Run).
+- [[007-worktree-lane-integration]] — worktree lanes branch from base; integrate via conflict-resolution.
 
 ## Conventions
 
