@@ -3,8 +3,8 @@
 # Cargo runs from repo root so rustup honors rust-toolchain.toml.
 CARGO_EDGE_HOST := -p wagner-edge-host
 
-.PHONY: dev cargo clippy e2e ts arch typecheck hub verify \
-	edge edge-build edge-ui shell
+.PHONY: dev cargo clippy e2e ts arch typecheck hub hub-e2e verify \
+	edge edge-build edge-ui shell dev-setup docker-hub
 
 # Launch the live MV hub (Deno + Hono): OIDC + ephemeral discovery (long-running).
 dev:
@@ -60,9 +60,28 @@ arch:
 typecheck:
 	npm run typecheck
 
-# Hub (Deno): OIDC + discovery registry unit tests.
+# Hub (Deno): OIDC + discovery registry unit + contract tests.
 hub:
 	cd hub && deno task test
+
+# Hub E2E: boots a real Deno.serve on a random port; exercises all HTTP
+# endpoints end-to-end with a local OIDC stub (no external network).
+hub-e2e:
+	cd hub && deno test -A --no-check=remote tests/e2e/
+
+# Verify local toolchain prerequisites are installed (non-destructive check).
+dev-setup:
+	@echo "Checking prerequisites..."
+	@rustup show active-toolchain 2>/dev/null || (echo "ERROR: rustup not found — install from https://rustup.rs" && exit 1)
+	@deno --version >/dev/null 2>&1 || (echo "ERROR: deno not found — install from https://deno.com" && exit 1)
+	@node --version >/dev/null 2>&1 || (echo "ERROR: node not found — install from https://nodejs.org" && exit 1)
+	@docker info >/dev/null 2>&1 || (echo "WARN: docker not running — needed only for make docker-hub")
+	@echo "Prerequisites OK."
+
+# Build and start the hub container (requires docker).
+docker-hub:
+	docker build -t wagner-hub:local hub/
+	docker compose up hub
 
 # Full pre-merge gate: clippy → cargo → shell → typecheck → ts →
 # edge-frontend build → hub.
