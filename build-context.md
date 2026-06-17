@@ -7,7 +7,7 @@
 >
 > (Not to be confused with `CONTEXT.md` — that's the domain glossary.)
 
-Last updated: 2026-06-17 (Phase 6 hub vault steps 1-6 done; step 7 live iroh remains)
+Last updated: 2026-06-17 (Phase 6 COMPLETE — hub vault + GossipSyncAdapter + IrohDocsStore + live gossip test; next: E2E breadth)
 
 ## Mission
 
@@ -92,27 +92,25 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
       gossip/docs + the file↔CRDT projector. INTEGRATED ✓ (merged from lane/sync;
       VaultCrdt, projector, sync_adapter, snapshot_store, wikilink rewrite; 6 unit
       tests; verify+accept green).
-- [ ] **Phase 6 — Hub vault store + multi-teammate sync + presence**.
+- [x] **Phase 6 — Hub vault store + multi-teammate sync + presence** (`specs/008-hub-vault`): COMPLETE (7 steps committed `97ea96e` + `4d24d86`). Deno hub: article9 gate, LoroHub, doc_store, metadata_store, presence routes; edge: GossipSyncAdapter (iroh-gossip), IrohDocsStore (iroh-docs HTTP sidecar), live gossip integration test (`vault_sync_live`). `make verify` + `make hub-e2e` green.
 - [ ] **Voice** (`specs/007-voice`): faster-whisper STT + Kokoro TTS, `voice/`
       seam. Fully parallel (handoff §7).
 
 ## Current position
 
-**Phases 0–5 COMPLETE** — all committed on `feat/autonomous-build`, `make accept`
-green. Foundation, Sessions (003), Vault v1 (004), Graph (005), Sync (006), Voice
-(007), Devex/Docker/hub-E2E all merged and verified.
+**Phases 0–6 COMPLETE** — all committed on `feat/autonomous-build`, `make verify` +
+`make hub-e2e` green. Foundation, Sessions (003), Vault v1 (004), Graph (005), Sync
+(006), Voice (007), Devex/Docker/hub-E2E, Hub vault + iroh adapters (008) all done.
 
 **DONE:** Foundation, Sessions (003), Vault v1 (004), Voice (007), Devex/Docker/
-hub-E2E, Graph/Vault browser (005), Distributed sync v1 (006). All on
-`feat/autonomous-build`; `make verify` + `make hub-e2e` + `make accept` green.
+hub-E2E, Graph/Vault browser (005), Distributed sync v1 (006), Hub vault +
+GossipSyncAdapter + IrohDocsStore (008). All on `feat/autonomous-build`;
+`make verify` + `make hub-e2e` green.
 
 **Next, in roadmap order:**
-1. **Phase 6 — Hub vault store + multi-teammate sync + presence** (`specs/008-hub`,
-   plan already authored). Deno hub: vault REST endpoints, SyncAdapter over WebSocket,
-   snapshot store backed by SQLite/KV, presence broadcast. Depends on sync traits
-   from Phase 5 (✓ available). See `specs/008-hub/plan.md`.
-2. Expand the UI journey to cover session rail/resume/add-goal/multi-session and
-   vault browser (E2E breadth).
+1. **E2E breadth** — expand UI journey to cover session rail/resume/add-goal/
+   multi-session and vault browser. Run `make accept` to gate the full journey.
+2. **Docker / hub production hardening** — any remaining items from devex lane.
 
 **Resume protocol:** `git log --oneline -40` shows every step. Re-run `make verify`
 (+ `make hub-e2e`, `make accept`), then continue at the first unbuilt item above.
