@@ -128,3 +128,7 @@ path = "tests/unit/sync_adapter_inmemory.rs"
 [[test]]
 name = "snapshot_store_inmemory"
 path = "tests/unit/snapshot_store_inmemory.rs"
+
+[[test]]
+name = "wikilink_rename"
+path = "tests/unit/wikilink_rename.rs"
