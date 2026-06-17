@@ -11,10 +11,17 @@ Last updated: 2026-06-17 (autonomous build kickoff)
 
 ## Mission
 
-Build the **entire Wagner product** autonomously, overnight, committing each
-green step to `main`. No questions to the operator unless a hard blocker forces
-it. The operator is asleep. Decisions come from the locked plan + sensible
-defaults and are recorded in `memory/`.
+Build the **entire Wagner product to 100%** autonomously, no stopping — plus
+local-dev/devex setup, full E2E testing, and Docker for the server (hub).
+Commit each green step (to `feat/autonomous-build`; see rule 1). No questions
+unless a hard blocker forces it. Decisions come from the plans + sensible
+defaults, recorded in `memory/`.
+
+### In-flight parallel lanes (worktree-isolated agents; INTEGRATE when done)
+- `lane/voice` — Voice pillar (specs/007-voice). Disjoint files (edge/host/src/voice/**).
+- `lane/devex` — Docker for hub + hub E2E + docs/development.md + Makefile devex targets.
+After each reports green, integrate: `git merge lane/<name>` into feat/autonomous-build,
+then `make verify`. Main loop owns Vault (edge/host/src/memory.rs + vault/**).
 
 Wagner = a distributed engineering platform: run autonomous coding agents and
 accumulate what they learn into a shared, living knowledge base. **Edge executes,
