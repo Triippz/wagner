@@ -1,0 +1,39 @@
+# Wagner — local Docker Compose
+#
+# Starts the hub (Deno + Hono) server for local development and testing.
+# All hub config comes from environment variables (D-SEC-2); no secrets are
+# baked into this file. Copy and populate `.env.hub` from the template below
+# before running `make docker-hub`.
+#
+# Usage:
+#   cp .env.hub.example .env.hub   # fill in your OIDC values
+#   make docker-hub                 # build + start
+#   docker compose logs -f hub      # tail logs
+#   docker compose down             # stop
+
+services:
+  hub:
+    build:
+      context: hub/
+      dockerfile: Dockerfile
+    image: wagner-hub:local
+    container_name: wagner-hub
+    ports:
+      # Host port 8787 → container port 8787 (hub default; override via PORT env)
+      - "${HUB_PORT:-8787}:8787"
+    environment:
+      PORT: 8787
+      # OIDC config — all required for authenticated routes (/v1/*).
+      # Health probe (/health) works without these.
+      OIDC_ALLOWED_ISSUERS: "${OIDC_ALLOWED_ISSUERS:-}"
+      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID:-}"
+      OIDC_ALLOWED_DOMAINS: "${OIDC_ALLOWED_DOMAINS:-}"
+      OIDC_ALLOWED_GROUPS: "${OIDC_ALLOWED_GROUPS:-}"
+      OIDC_ISSUER_JWKS: "${OIDC_ISSUER_JWKS:-}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "deno eval \"const r = await fetch('http://localhost:8787/health'); if (!r.ok) Deno.exit(1)\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
