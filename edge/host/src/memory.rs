@@ -46,6 +46,35 @@ pub struct NoteMeta {
     pub relationships: Vec<(String, String)>,
 }
 
+/// A tiered-retrieval query (Plan 004 step 5): cheapest-match-first lookup that
+/// keeps cost ~constant as the vault grows.
+pub struct TieredQuery<'a> {
+    pub project_id: &'a str,
+    pub terms: &'a str,
+    pub limit: usize,
+}
+
+/// One tiered-retrieval hit, tagged by the tier it matched at (summary → section
+/// → full body → reached via a relationship hop).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TieredResult {
+    Summary(MemoryRecord),
+    Section(MemoryRecord),
+    Full(MemoryRecord),
+    Related(MemoryRecord),
+}
+
+impl TieredResult {
+    pub fn record(&self) -> &MemoryRecord {
+        match self {
+            TieredResult::Summary(r)
+            | TieredResult::Section(r)
+            | TieredResult::Full(r)
+            | TieredResult::Related(r) => r,
+        }
+    }
+}
+
 /// A stored learning. `uid` is our own ULID (not the Surreal RecordId) so records
 /// round-trip as plain strings without RecordId (de)serialization friction. Every
 /// field is a plain scalar/array — SurrealDB 2.x's content serializer rejects Rust
@@ -441,6 +470,116 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Notes reached by walking `vault_relationship` edges up to `max_hops` from
+    /// the seeds (Plan 004 step 7). Excludes the seeds; cycle-safe (each uid
+    /// visited once); `max_hops = 0` returns empty. Used by `tiered_query` (1 hop)
+    /// and by the graph view (Plan 005) with larger hop counts.
+    pub async fn related_by_bfs(
+        &self,
+        seeds: &[String],
+        max_hops: usize,
+    ) -> surrealdb::Result<Vec<MemoryRecord>> {
+        use std::collections::HashSet;
+        let mut visited: HashSet<String> = seeds.iter().cloned().collect();
+        let mut frontier: Vec<String> = seeds.to_vec();
+        let mut reached: Vec<String> = Vec::new();
+        #[derive(Deserialize)]
+        struct T {
+            target_uid: String,
+        }
+        for _ in 0..max_hops {
+            if frontier.is_empty() {
+                break;
+            }
+            let mut res = self
+                .db
+                .query("SELECT target_uid FROM vault_relationship WHERE source_uid IN $f")
+                .bind(("f", frontier.clone()))
+                .await?;
+            let rows: Vec<T> = res.take(0)?;
+            let mut next = Vec::new();
+            for r in rows {
+                if visited.insert(r.target_uid.clone()) {
+                    reached.push(r.target_uid.clone());
+                    next.push(r.target_uid);
+                }
+            }
+            frontier = next;
+        }
+        self.records_in_order(&reached).await
+    }
+
+    /// Fetch records for `uids`, preserving the given order (missing uids dropped).
+    async fn records_in_order(&self, uids: &[String]) -> surrealdb::Result<Vec<MemoryRecord>> {
+        if uids.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut res = self
+            .db
+            .query("SELECT * FROM memory WHERE uid IN $u")
+            .bind(("u", uids.to_vec()))
+            .await?;
+        let recs: Vec<MemoryRecord> = res.take(0)?;
+        let by_uid: std::collections::HashMap<String, MemoryRecord> =
+            recs.into_iter().map(|r| (r.uid.clone(), r)).collect();
+        Ok(uids.iter().filter_map(|u| by_uid.get(u).cloned()).collect())
+    }
+
+    /// Tiered retrieval (Plan 004 step 5): summary-match → section (first ~300ch)
+    /// → full-body → 1-hop relationship neighbours. Dedup across tiers, returned
+    /// in tier order, capped at `limit` direct hits (Related neighbours append).
+    /// ponytail: substring matching + an in-memory project scan (≤500 notes) —
+    /// push to SQL / BM25 ranking when a vault outgrows that.
+    pub async fn tiered_query(
+        &self,
+        q: TieredQuery<'_>,
+    ) -> surrealdb::Result<Vec<TieredResult>> {
+        let term = q.terms.to_lowercase();
+        let mut res = self
+            .db
+            .query("SELECT * FROM memory WHERE project_id = $pid LIMIT 500")
+            .bind(("pid", q.project_id.to_string()))
+            .await?;
+        let notes: Vec<MemoryRecord> = res.take(0)?;
+
+        let mut out: Vec<TieredResult> = Vec::new();
+        let mut matched: Vec<String> = Vec::new();
+        // Pass in tier order so earlier tiers win the dedup.
+        for tier in 0..3 {
+            for n in &notes {
+                if out.len() >= q.limit {
+                    break;
+                }
+                if matched.contains(&n.uid) {
+                    continue;
+                }
+                let hit = match tier {
+                    0 => n.summary.to_lowercase().contains(&term) && !term.is_empty(),
+                    1 => {
+                        let head: String = n.text.chars().take(300).collect();
+                        head.to_lowercase().contains(&term) && !term.is_empty()
+                    }
+                    _ => n.text.to_lowercase().contains(&term) && !term.is_empty(),
+                };
+                if hit {
+                    matched.push(n.uid.clone());
+                    out.push(match tier {
+                        0 => TieredResult::Summary(n.clone()),
+                        1 => TieredResult::Section(n.clone()),
+                        _ => TieredResult::Full(n.clone()),
+                    });
+                }
+            }
+        }
+        // Tier 4: one relationship hop out from the direct hits.
+        for r in self.related_by_bfs(&matched, 1).await? {
+            if !matched.contains(&r.uid) {
+                out.push(TieredResult::Related(r));
+            }
+        }
+        Ok(out)
+    }
+
     /// Project a saved learning to git-diffable Markdown under the project's
     /// `.wagner/memory/`. Best-effort — never fails on an FS hiccup. Owned by the
     /// store rather than the command handler.
@@ -727,6 +866,100 @@ mod tests {
         assert!(store.backlinks_for(&rec.uid).await.unwrap().is_empty());
         assert_eq!(store.resolve_name("A Title Nobody Indexed").await.unwrap(), None);
         assert!(!rec.uid.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tiered_query_orders_summary_then_full_and_dedups() {
+        let (store, dir) = temp_store().await;
+        // A: matches in summary (tier 1). B: matches only in body (tier 3).
+        store
+            .save_note(
+                note_input("p", "long body about sessions"),
+                NoteMeta { title: "A".into(), summary: "auth flow design".into(), ..Default::default() },
+                "2026-06-17T00:00:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        store
+            .save_note(
+                note_input("p", "RBAC and auth checks live here"),
+                NoteMeta { title: "B".into(), ..Default::default() },
+                "2026-06-17T00:01:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        let hits = store
+            .tiered_query(TieredQuery { project_id: "p", terms: "auth", limit: 10 })
+            .await
+            .unwrap();
+        // The summary hit (A) ranks first; the body-only hit (B) also appears at a
+        // lower tier; each note appears exactly once across tiers.
+        assert!(matches!(hits[0], TieredResult::Summary(_)));
+        assert!(hits.iter().any(|h| h.record().text.contains("RBAC")));
+        let uids: Vec<_> = hits.iter().map(|h| h.record().uid.clone()).collect();
+        let mut dedup = uids.clone();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(uids.len(), dedup.len(), "no note repeated across tiers");
+    }
+
+    #[tokio::test]
+    async fn tiered_query_reaches_related_neighbour() {
+        let (store, dir) = temp_store().await;
+        let b = store
+            .save_note(
+                note_input("p", "the derived note"),
+                NoteMeta { title: "B".into(), ..Default::default() },
+                "2026-06-17T00:00:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        // A matches by summary and relates to B.
+        store
+            .save_note(
+                note_input("p", "A body"),
+                NoteMeta {
+                    title: "A".into(),
+                    summary: "auth design".into(),
+                    relationships: vec![(b.uid.clone(), "derived_from".into())],
+                    ..Default::default()
+                },
+                "2026-06-17T00:01:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        let hits = store
+            .tiered_query(TieredQuery { project_id: "p", terms: "auth", limit: 10 })
+            .await
+            .unwrap();
+        assert!(hits.iter().any(|h| matches!(h, TieredResult::Related(r) if r.uid == b.uid)));
+    }
+
+    #[tokio::test]
+    async fn bfs_hops_and_cycles() {
+        let (store, _d) = temp_store().await;
+        // Chain A -> B -> C, plus a cycle C -> A.
+        store.write_relationships("A", &[("B".into(), "uses".into())]).await.unwrap();
+        store.write_relationships("B", &[("C".into(), "uses".into())]).await.unwrap();
+        store.write_relationships("C", &[("A".into(), "uses".into())]).await.unwrap();
+        // Records must exist to be returned.
+        for id in ["A", "B", "C"] {
+            store.db.query("CREATE type::thing('memory', $u) SET uid = $u, user_id = 'me', project_id = 'p', text = '', tags = [], created_at = '', curation_state = 'auto', source_type = '', source_ref = '', summary = '', tier = '', lifecycle = '', provenance = ''")
+                .bind(("u", id.to_string())).await.unwrap().check().unwrap();
+        }
+        let zero = store.related_by_bfs(&["A".into()], 0).await.unwrap();
+        assert!(zero.is_empty());
+        let one: Vec<_> = store.related_by_bfs(&["A".into()], 1).await.unwrap().iter().map(|r| r.uid.clone()).collect();
+        assert_eq!(one, vec!["B".to_string()]);
+        let two: Vec<_> = store.related_by_bfs(&["A".into()], 2).await.unwrap().iter().map(|r| r.uid.clone()).collect();
+        assert_eq!(two, vec!["B".to_string(), "C".to_string()]);
+        // Deep walk terminates despite the C -> A cycle (A is a seed, never re-added).
+        let deep = store.related_by_bfs(&["A".into()], 9).await.unwrap();
+        assert_eq!(deep.len(), 2); // B and C only
     }
 
     #[tokio::test]
