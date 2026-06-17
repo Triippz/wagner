@@ -157,6 +157,78 @@ export function selectRun(state: WagnerState, runId: string): WagnerState {
   return { ...state, selectedRunId: runId };
 }
 
+/** Status dot for the session rail. ponytail: a per-session "needs-you" dot needs
+ *  transmissions keyed by run id (they aren't yet) — that's a global indicator in
+ *  the TopBar for now; the rail dot reflects run status. */
+export type SessionDot = "running" | "idle" | "done";
+
+export function sessionDot(status: RunSnapshot["status"]): SessionDot {
+  if (status === "running") return "running";
+  if (status === "met" || status === "aborted" || status === "halted_guardrail")
+    return "done";
+  return "idle"; // drafted | paused
+}
+
+/** A session rail row — what the rail renders. */
+export interface SessionRow {
+  run_id: string;
+  name: string;
+  goal: string;
+  project_dir: string;
+  status: RunSnapshot["status"];
+  dot: SessionDot;
+  /** True if the session is live in memory (vs a persisted closed summary). */
+  live: boolean;
+}
+
+/** Minimal persisted-summary shape the rail merges in (mirrors host RunSummary). */
+export interface SessionSummary {
+  run_id: string;
+  name: string;
+  goal: string;
+  project_dir: string;
+  status: RunSnapshot["status"];
+  updated_at: string;
+}
+
+/** Merge live sessions (full snapshots) with persisted closed summaries from
+ *  disk, newest-first by updated_at. A live session wins over a summary of the
+ *  same id (it's the fresher truth). */
+export function sessionRows(
+  runs: Record<string, RunSnapshot>,
+  summaries: SessionSummary[]
+): SessionRow[] {
+  const merged = new Map<string, SessionRow & { updated_at: string }>();
+  for (const s of summaries) {
+    merged.set(s.run_id, {
+      run_id: s.run_id,
+      name: s.name || s.run_id,
+      goal: s.goal,
+      project_dir: s.project_dir,
+      status: s.status,
+      dot: sessionDot(s.status),
+      live: false,
+      updated_at: s.updated_at,
+    });
+  }
+  for (const r of Object.values(runs)) {
+    merged.set(r.run_id, {
+      run_id: r.run_id,
+      name: r.name || r.run_id,
+      goal: r.goal,
+      project_dir: r.project_dir ?? "",
+      status: r.status,
+      dot: sessionDot(r.status),
+      live: true,
+      updated_at: r.updated_at ?? "",
+    });
+  }
+  return [...merged.values()]
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    .map(({ updated_at, ...row }) => row);
+}
+
 /** Open or update a transmission (dedup by id; newest fields win). */
 export function applyTransmission(
   state: WagnerState,

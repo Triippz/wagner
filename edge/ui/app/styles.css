@@ -198,9 +198,62 @@ button {
 /* ---- Body layout ------------------------------------------------------- */
 .console {
   display: grid;
-  grid-template-columns: minmax(280px, 340px) 1fr;
+  grid-template-columns: minmax(180px, 220px) minmax(260px, 320px) 1fr;
   min-height: 0;
 }
+/* Session rail — left-most column listing sessions with status dots. */
+.session-rail {
+  background: var(--surface);
+  border-right: 1px solid var(--border-soft);
+  overflow-y: auto;
+  z-index: var(--z-rail);
+  display: flex;
+  flex-direction: column;
+}
+.session-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px 9px;
+  position: sticky;
+  top: 0;
+  background: linear-gradient(var(--surface) 70%, transparent);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background 0.13s var(--ease-out);
+}
+.session-row:hover { background: var(--surface-2); }
+.session-row.is-selected { background: var(--surface-2); border-color: var(--border-soft); }
+.session-row .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--ink-faint); }
+.session-row .dot-running { background: var(--accent); animation: pulse 1.8s var(--ease-out) infinite; }
+.session-row .dot-done { background: var(--success); }
+.session-row .dot-idle { background: var(--ink-faint); }
+.session-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-goal { grid-column: 2; font-size: 11px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-empty { padding: 10px; color: var(--ink-faint); font-size: 12px; }
 .rail {
   background: var(--surface);
   border-right: 1px solid var(--border-soft);

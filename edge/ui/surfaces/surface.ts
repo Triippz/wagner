@@ -13,6 +13,7 @@ import {
   applyEvent,
   applyRun,
   applyTransmission,
+  selectRun as selectRunReducer,
   initialState,
   type WagnerState,
 } from "../store/reducer";
@@ -53,6 +54,9 @@ export interface Surface {
   onChange(listener: (state: WagnerState) => void): () => void;
   /** Send a control message toward the host (answer-permission, steer, …). */
   send(message: TransportMessage): Promise<void>;
+  /** Focus a session locally (the rail's selection — a UI action, not a host
+   *  event). Updates state and notifies listeners. */
+  selectRun(runId: string): void;
   /** Tear down the transport subscription. */
   dispose(): void;
 }
@@ -92,6 +96,10 @@ export function createSurface(transport: EventStreamTransport): Surface {
       return () => listeners.delete(listener);
     },
     send: (message) => transport.send(message),
+    selectRun(runId) {
+      state = selectRunReducer(state, runId);
+      for (const l of listeners) l(state);
+    },
     dispose: () => unsubscribe(),
   };
 }

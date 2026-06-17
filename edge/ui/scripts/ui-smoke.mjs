@@ -96,6 +96,9 @@ try {
 
   await page.waitForSelector("text=Running", { timeout: 8000 });
   await page.waitForSelector("text=Vex", { timeout: 8000 });
+  // Session rail lists the live session (acceptance U6).
+  await page.waitForSelector(".session-rail", { timeout: 8000 });
+  await page.waitForSelector("text=Sessions", { timeout: 8000 });
 
   // 2b) Select an operative -> transcript inspector.
   await page.click("text=Vex");

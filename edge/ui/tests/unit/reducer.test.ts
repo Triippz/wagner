@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   activeRun,
+  sessionRows,
   applyEvent,
   applyRun,
   applyTransmission,
@@ -204,6 +205,29 @@ describe("run + transmissions", () => {
     // First session (rA) auto-focused, so activeRun follows it.
     expect(ab.selectedRunId).toBe("rA");
     expect(activeRun(ab)?.run_id).toBe("rA");
+  });
+
+  it("merges live sessions with persisted closed summaries for the rail", () => {
+    // One live session (rA) + two closed summaries (rB live-shadowed, rC only on
+    // disk). Live wins; result is newest-first by updated_at (acceptance U6).
+    const live = applyRun(initialState, {
+      ...run,
+      run_id: "rA",
+      name: "alpha",
+      updated_at: "2026-06-17T05:00:00Z",
+    });
+    const rows = sessionRows(live.runs, [
+      { run_id: "rA", name: "stale-alpha", goal: "g", project_dir: "/a", status: "paused", updated_at: "2026-06-17T01:00:00Z" },
+      { run_id: "rC", name: "gamma", goal: "g", project_dir: "/c", status: "met", updated_at: "2026-06-17T04:00:00Z" },
+    ]);
+    expect(rows.map((r) => r.run_id)).toEqual(["rA", "rC"]); // newest-first
+    const rA = rows.find((r) => r.run_id === "rA")!;
+    expect(rA.live).toBe(true); // live snapshot wins over the stale summary
+    expect(rA.name).toBe("alpha");
+    expect(rA.dot).toBe("running");
+    const rC = rows.find((r) => r.run_id === "rC")!;
+    expect(rC.live).toBe(false);
+    expect(rC.dot).toBe("done"); // met -> done
   });
 
   it("stores the run phase and subtasks for the mission bar + inspector", () => {
