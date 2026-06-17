@@ -232,11 +232,32 @@ Docker references.
 - [ ] `build-context.md` updated; Docker voice path fully retired
 - [ ] `make verify` + `make accept` green
 
-## Decisions (filled during Step 1)
+## Decisions (verified in Step 1 — two native spikes)
 
-- TTS engine: _TBD (Kokoros vs sherpa-onnx)_
-- Binary sources / versions: _TBD_
-- Model files + sizes: _TBD_
+- **STT = whisper.cpp `whisper-server`** (Homebrew `whisper-cpp` 1.8.7; for the
+  bundle we ship the binary). Flags: `--host 127.0.0.1 --port 8771
+  --inference-path /v1/audio/transcriptions --model ggml-tiny.en.bin --threads 4`.
+  Model `ggml-tiny.en.bin` 74 MB (HF `ggerganov/whisper.cpp`). **No HttpStt change.**
+- **TTS = our own in-repo Rust sidecar crate** (not a third-party binary). Stack:
+  `misaki-rs` (pure-Rust MIT G2P, `default-features = false` → no espeak/GPL) →
+  `ort` (ONNX Runtime, MIT) running the **Kokoro-82M** ONNX model → WAV → a tiny
+  HTTP server (`tiny_http`) on `127.0.0.1:8772` exposing `POST /v1/audio/speech`.
+  Model: `kokoro-v1.0.onnx` (q8 ≈ 92 MB or fp16 ≈ 163 MB) + `voices-v1.0.bin`
+  (~27 MB) from `onnx-community/Kokoro-82M-v1.0-ONNX` / `thewh1teagle/kokoro-onnx`
+  (Apache-2.0 weights). Compiles as a workspace crate → bundles as `externalBin`,
+  no fork to maintain, no Python, no GPL.
+- **Why not Kokoros/koko or sherpa-onnx:** both pull in **espeak-ng (GPLv3)** via
+  their phonemizer — a real risk even for an internal tool. Replacing the
+  phonemizer (misaki-rs), not the model, removes it. Deep TTS survey (Step 1)
+  confirmed nothing clean-permissive beats Kokoro on quality.
+- **HttpTts adapter:** our sidecar returns WAV directly → likely no change needed
+  (confirm Content-Type handling). `voice: "af_bella"` maps via misaki/voices.bin.
+- **OOV tradeoff:** words outside misaki's lexicon spell letter-by-letter;
+  acceptable, fixable later with a small custom lexicon.
+- **Total first-enable model download ≈ 165–240 MB** (whisper tiny.en 74 MB +
+  Kokoro q8/fp16 ~92–163 MB). Confirms download-on-first-enable (Step 7).
+- **Attribution:** ship a LICENSES/NOTICE record (MIT whisper.cpp + ggml; MIT
+  misaki-rs + ort; Apache-2.0 Kokoro weights).
 
 ## Risks & open questions
 
