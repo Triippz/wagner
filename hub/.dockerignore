@@ -1,0 +1,23 @@
+# Wagner Hub — .dockerignore
+# Keep the build context small: exclude test files, local dev artefacts,
+# and anything not needed to run the hub in production.
+
+# Test suite (not needed in prod image)
+tests/
+
+# Editor / OS artefacts
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local dev overrides
+*.local
+
+# Git metadata
+.git/
+.gitignore
+
+# CI artefacts
+coverage/
