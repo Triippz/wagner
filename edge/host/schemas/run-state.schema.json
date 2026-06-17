@@ -150,6 +150,25 @@
           }
         }
       }
+    },
+    "project_dir": {
+      "type": "string",
+      "description": "On-disk project dir the session runs in; persisted so a closed session can be resumed. Empty on legacy runs."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable session label for the rail (defaults to the folder name)."
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "Last-saved timestamp; drives the session rail's newest-first ordering. Defaults to created_at on legacy runs."
+    },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Append-only goal thread; seeded with the first goal, extended by add_goal."
     }
   },
   "$defs": {

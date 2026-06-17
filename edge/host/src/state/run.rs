@@ -140,6 +140,23 @@ pub struct Run {
     pub transmissions: Vec<String>,
     #[serde(default)]
     pub console_inputs: Vec<ConsoleInput>,
+    // --- Session fields (a Run IS a session; see memory/002) ---
+    /// The on-disk project directory the session's agents run in. Persisted so a
+    /// closed session can be resumed (the pool is rebuilt against this cwd).
+    /// Empty on legacy runs created before sessions existed.
+    #[serde(default)]
+    pub project_dir: String,
+    /// Human-readable session label for the rail (defaults to the folder name).
+    #[serde(default)]
+    pub name: String,
+    /// Last-saved timestamp — drives the session rail's newest-first ordering.
+    /// Defaults to `created_at` for legacy runs.
+    #[serde(default)]
+    pub updated_at: String,
+    /// The session's goal thread — append-only. Seeded with the first goal at
+    /// creation; `add_goal` appends and reactivates the session.
+    #[serde(default)]
+    pub goals: Vec<String>,
 }
 
 impl Run {
@@ -151,17 +168,43 @@ impl Run {
         Self {
             schema: Self::SCHEMA.to_string(),
             run_id,
-            goal,
+            goal: goal.clone(),
             docs,
             status: RunStatus::Drafted,
             phase: RunPhase::Idle,
             iteration: 0,
             guardrails: Guardrails::defaults(),
-            created_at,
+            created_at: created_at.clone(),
             halt_reason: None,
             subtasks: Vec::new(),
             transmissions: Vec::new(),
             console_inputs: Vec::new(),
+            // Session fields. `project_dir`/`name` are set by the caller after
+            // construction (start_run/resume_run); `goals` seeds with the first
+            // goal so a session is a durable goal-thread from the start;
+            // `updated_at` starts equal to `created_at`.
+            project_dir: String::new(),
+            name: String::new(),
+            updated_at: created_at,
+            goals: vec![goal],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_seeds_goals_and_updated_at() {
+        let r = Run::new(
+            "01J0RUN0000000000000000002".into(),
+            "first goal".into(),
+            vec![],
+            "2026-06-17T00:00:00Z".into(),
+        );
+        assert_eq!(r.goals, vec!["first goal".to_string()]);
+        assert_eq!(r.updated_at, "2026-06-17T00:00:00Z");
+        assert_eq!(r.project_dir, "");
     }
 }

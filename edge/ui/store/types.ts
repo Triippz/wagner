@@ -60,6 +60,14 @@ export interface RunSnapshot {
   schema: "wagner-run.v1";
   run_id: string;
   goal: string;
+  /** Session fields (a Run is a session). Optional: legacy runs omit them. */
+  project_dir?: string;
+  /** Display label for the session rail (defaults to the folder name). */
+  name?: string;
+  /** Last-saved timestamp — drives the rail's newest-first ordering. */
+  updated_at?: string;
+  /** Append-only goal thread; seeded with the first goal. */
+  goals?: string[];
   status: RunStatus;
   /** Current loop step (omitted by older run-states; defaults to "idle"). */
   phase?: RunPhase;

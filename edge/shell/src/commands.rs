@@ -157,6 +157,15 @@ pub async fn start_run(
             used: 0.0,
         },
     };
+    // Session fields: persist the resolved project dir so a closed session can be
+    // resumed (the pool is rebuilt against this cwd); derive a rail label from the
+    // folder name; updated_at starts at created_at and advances on each save.
+    run.project_dir = project_cwd.to_string_lossy().into_owned();
+    run.name = project_cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| run_id.clone());
+    run.updated_at = run.created_at.clone();
 
     let console = Arc::new(Mutex::new(Vec::<ConsoleInput>::new()));
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
