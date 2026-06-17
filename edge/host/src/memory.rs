@@ -31,6 +31,21 @@ pub struct MemoryInput {
     pub source_ref: Option<String>,
 }
 
+/// The vault knowledge-model metadata for a note (Plan 004). Separate from the
+/// persisted scalars so callers (and the future semantic-extraction step) build
+/// it explicitly. `relationships` is `(target, rel_type)` — stored in the
+/// relationship table, not on the record (Surreal rejects nested objects).
+#[derive(Debug, Clone, Default)]
+pub struct NoteMeta {
+    /// Display name for the link index; derived from the body's first line if empty.
+    pub title: String,
+    pub summary: String,
+    pub tier: String,
+    pub lifecycle: String,
+    pub provenance: String,
+    pub relationships: Vec<(String, String)>,
+}
+
 /// A stored learning. `uid` is our own ULID (not the Surreal RecordId) so records
 /// round-trip as plain strings without RecordId (de)serialization friction. Every
 /// field is a plain scalar/array — SurrealDB 2.x's content serializer rejects Rust
@@ -87,6 +102,16 @@ pub struct MemoryStore {
     db: Surreal<Db>,
     /// Single-tenant default until a central server lands; carried on every row.
     user_id: String,
+}
+
+/// A note's display title for the link index: the first non-empty line (stripped
+/// of a leading `#`), capped to 80 chars. Empty body → empty title.
+pub fn derive_title(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(|l| l.trim_start_matches('#').trim().chars().take(80).collect())
+        .unwrap_or_default()
 }
 
 /// Stable id from a name (template ids, memory slugs).
@@ -194,6 +219,63 @@ impl MemoryStore {
         // omits the Surreal `id`) — a `serde_json::Value` would choke on the RecordId.
         let _: Option<MemoryRecord> =
             self.db.create(("memory", uid.as_str())).content(rec.clone()).await?;
+        Ok(rec)
+    }
+
+    /// Save a vault note (Plan 004 step 4): the unified write path. Persists the
+    /// record (with vault scalars), indexes its title, parses `[[wikilinks]]`
+    /// deterministically, writes the wikilink rows (with resolved target uids),
+    /// the inbound backlinks for resolved targets, the typed relationships, and
+    /// the Markdown projection. A body with no links saves cleanly; an unresolved
+    /// link is recorded with an empty target, never an error.
+    /// ponytail: relationship frontmatter projection is deferred — the
+    /// relationship table is the source of truth; add it to the projection when
+    /// the graph view needs links visible in the `.md` itself.
+    pub async fn save_note(
+        &self,
+        input: MemoryInput,
+        meta: NoteMeta,
+        now: &str,
+        project_dir: &Path,
+    ) -> surrealdb::Result<MemoryRecord> {
+        let uid = ulid::Ulid::new().to_string();
+        let title = if meta.title.trim().is_empty() {
+            derive_title(&input.text)
+        } else {
+            meta.title.trim().to_string()
+        };
+        let rec = MemoryRecord {
+            uid: uid.clone(),
+            user_id: self.user_id.clone(),
+            project_id: input.project_id,
+            text: input.text,
+            tags: input.tags,
+            created_at: now.to_string(),
+            curation_state: "auto".into(),
+            source_type: input.source_type.unwrap_or_default(),
+            source_ref: input.source_ref.unwrap_or_default(),
+            summary: meta.summary,
+            tier: meta.tier,
+            lifecycle: meta.lifecycle,
+            provenance: meta.provenance,
+        };
+        let _: Option<MemoryRecord> =
+            self.db.create(("memory", uid.as_str())).content(rec.clone()).await?;
+
+        if !title.is_empty() {
+            self.upsert_name_index(&uid, &title).await?;
+        }
+        let links = crate::vault::parse_wikilinks(&rec.text);
+        self.write_wikilinks(&uid, &links).await?;
+        let mut targets = Vec::new();
+        for l in &links {
+            if let Some(t) = self.resolve_name(&l.display_name).await? {
+                targets.push(t);
+            }
+        }
+        self.write_backlinks(&uid, &targets).await?;
+        self.write_relationships(&uid, &meta.relationships).await?;
+        self.write_markdown_projection(project_dir, &rec);
         Ok(rec)
     }
 
@@ -556,6 +638,95 @@ mod tests {
         store.write_backlinks("01A", &["01B".to_string()]).await.unwrap();
         assert_eq!(store.backlinks_for("01B").await.unwrap(), vec!["01A".to_string()]);
         assert!(store.backlinks_for("01ZZZ").await.unwrap().is_empty());
+    }
+
+    fn note_input(project: &str, text: &str) -> MemoryInput {
+        MemoryInput {
+            project_id: project.into(),
+            text: text.into(),
+            tags: vec![],
+            source_type: None,
+            source_ref: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn save_note_writes_record_links_and_projection() {
+        let (store, dir) = temp_store().await;
+        let rec = store
+            .save_note(
+                note_input("proj", "# My Note\nSee [[Target Note]]."),
+                NoteMeta { summary: "a short note".into(), tier: "core".into(), ..Default::default() },
+                "2026-06-17T00:00:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        // Title indexed (derived from the first heading line).
+        assert_eq!(store.resolve_name("My Note").await.unwrap().as_deref(), Some(rec.uid.as_str()));
+        // Wikilink row written.
+        #[derive(serde::Deserialize)]
+        struct Row {
+            #[allow(dead_code)]
+            display_name: String,
+        }
+        let mut res = store
+            .db
+            .query("SELECT display_name FROM vault_wikilink WHERE source_uid = $s")
+            .bind(("s", rec.uid.clone()))
+            .await
+            .unwrap();
+        let rows: Vec<Row> = res.take(0).unwrap();
+        assert_eq!(rows.len(), 1);
+        // Markdown projected with vault scalars.
+        let md_path = dir.path().join(".wagner").join("memory").join(format!("{}.md", rec.uid));
+        assert!(md_path.exists());
+        let md = std::fs::read_to_string(&md_path).unwrap();
+        assert!(md.contains("summary: \"a short note\""));
+        assert!(md.contains("tier: \"core\""));
+    }
+
+    #[tokio::test]
+    async fn save_note_resolves_existing_link_into_backlink() {
+        let (store, dir) = temp_store().await;
+        let a = store
+            .save_note(
+                note_input("p", "Auth flow internals"),
+                NoteMeta { title: "Auth Flow".into(), ..Default::default() },
+                "2026-06-17T00:00:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        let b = store
+            .save_note(
+                note_input("p", "See [[Auth Flow]] for details."),
+                NoteMeta::default(),
+                "2026-06-17T00:01:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        // B's link resolved to A; A has an inbound backlink from B.
+        assert_eq!(store.backlinks_for(&a.uid).await.unwrap(), vec![b.uid.clone()]);
+    }
+
+    #[tokio::test]
+    async fn save_note_unresolved_link_is_not_fatal() {
+        let (store, dir) = temp_store().await;
+        let rec = store
+            .save_note(
+                note_input("p", "See [[Nonexistent Note]]."),
+                NoteMeta::default(),
+                "2026-06-17T00:00:00Z",
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        // No backlinks for a target that doesn't exist; the save still succeeded.
+        assert!(store.backlinks_for(&rec.uid).await.unwrap().is_empty());
+        assert_eq!(store.resolve_name("A Title Nobody Indexed").await.unwrap(), None);
+        assert!(!rec.uid.is_empty());
     }
 
     #[tokio::test]
