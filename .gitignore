@@ -16,5 +16,8 @@ edge/ui/.ui-shots/
 deno.lock.tmp
 # OS
 .DS_Store
+# IDE
+.idea/
+.vscode/
 # Logs
 *.log
