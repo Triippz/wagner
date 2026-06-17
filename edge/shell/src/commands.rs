@@ -13,6 +13,7 @@ use crate::pool::CliAgentPool;
 use wagner_edge_host::state::{ConsoleInput, Guardrails, Run};
 use wagner_edge_host::transmissions::TransmissionRegistry;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -23,10 +24,23 @@ use wagner_edge_host::schema::WORKFLOW_STEP_EVENT_SCHEMA;
 /// no iteration cap (fix-loops are additionally bounded by their per-edge caps).
 const DEFAULT_MAX_WORKFLOW_STEPS: usize = 200;
 
-/// Per-run control handle held in Tauri-managed state.
+/// Per-run control handles held in Tauri-managed state — one live entry per run
+/// id, so multiple sessions run concurrently (a `start_run` no longer replaces a
+/// prior one). Finished runs' entries linger until app exit (a completed
+/// JoinHandle is cheap). ponytail: self-removal-on-complete needs an Arc'd map
+/// cloned into the task; add it only if many-runs-per-session memory matters.
 #[derive(Default)]
 pub struct RunManager {
-    current: Mutex<Option<RunControl>>,
+    runs: Mutex<HashMap<String, RunControl>>,
+}
+
+/// Which run ids to abort given an optional target: `Some(id)` → just that id (if
+/// live); `None` → every live run (the single-run UI sends no id today).
+fn abort_targets(live: &[String], target: Option<&str>) -> Vec<String> {
+    match target {
+        Some(id) => live.iter().filter(|r| r.as_str() == id).cloned().collect(),
+        None => live.to_vec(),
+    }
 }
 
 struct RunControl {
@@ -254,11 +268,14 @@ pub async fn start_run(
         let _ = app_for_loop.emit("wagner://run", final_run);
     });
 
-    *mgr.current.lock().unwrap() = Some(RunControl {
-        task,
-        gate_server: gate.server_task,
-        console,
-    });
+    mgr.runs.lock().unwrap().insert(
+        run_id.clone(),
+        RunControl {
+            task,
+            gate_server: gate.server_task,
+            console,
+        },
+    );
     Ok(run_id)
 }
 
@@ -550,25 +567,37 @@ pub async fn start_workflow(
         );
     });
 
-    // Replace the active run — abort any prior one first so its loop + gate-server
-    // tasks (and the gate's loopback listener) don't leak on a back-to-back launch.
-    if let Some(prev) = mgr.current.lock().unwrap().replace(RunControl {
-        task,
-        gate_server: gate.server_task,
-        console,
-    }) {
-        prev.task.abort();
-        prev.gate_server.abort();
-    }
+    // Register this run alongside any others (concurrent sessions) — keyed by id.
+    mgr.runs.lock().unwrap().insert(
+        run_id.clone(),
+        RunControl {
+            task,
+            gate_server: gate.server_task,
+            console,
+        },
+    );
     Ok(run_id)
 }
 
 /// Inject a steering instruction into the in-flight run (US3). Recorded now;
 /// the loop drains the queue each iteration.
 #[tauri::command]
-pub fn steer(mgr: State<'_, RunManager>, text: String) -> Result<(), String> {
-    let guard = mgr.current.lock().unwrap();
-    let ctl = guard.as_ref().ok_or("no active run")?;
+pub fn steer(
+    mgr: State<'_, RunManager>,
+    run_id: Option<String>,
+    text: String,
+) -> Result<(), String> {
+    let guard = mgr.runs.lock().unwrap();
+    // Target the named session; with no id, target the sole live run (the
+    // single-session UI sends none). Refuse to guess when several are live.
+    let ctl = match run_id {
+        Some(id) => guard.get(&id).ok_or_else(|| format!("no run with id {id}"))?,
+        None => match guard.len() {
+            1 => guard.values().next().unwrap(),
+            0 => return Err("no active run".into()),
+            _ => return Err("multiple active runs; specify run_id".into()),
+        },
+    };
     ctl.console.lock().unwrap().push(ConsoleInput {
         ts: chrono::Utc::now().to_rfc3339(),
         text,
@@ -593,13 +622,18 @@ pub fn answer_transmission(
     }
 }
 
-/// Abort the active run (FR-017): terminate the loop task; CLI children are
-/// killed on drop (`kill_on_drop`).
+/// Abort a run (FR-017): terminate its loop task; CLI children are killed on
+/// drop (`kill_on_drop`). `run_id = Some(id)` aborts that session only (others
+/// keep running); `None` aborts every live run (the single-session UI default).
 #[tauri::command]
-pub fn abort(mgr: State<'_, RunManager>) -> Result<(), String> {
-    if let Some(ctl) = mgr.current.lock().unwrap().take() {
-        ctl.task.abort();
-        ctl.gate_server.abort();
+pub fn abort(mgr: State<'_, RunManager>, run_id: Option<String>) -> Result<(), String> {
+    let mut guard = mgr.runs.lock().unwrap();
+    let live: Vec<String> = guard.keys().cloned().collect();
+    for id in abort_targets(&live, run_id.as_deref()) {
+        if let Some(ctl) = guard.remove(&id) {
+            ctl.task.abort();
+            ctl.gate_server.abort();
+        }
     }
     Ok(())
 }
@@ -638,8 +672,19 @@ fn resolve_project_dir(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_project_dir, validate_project_dir};
+    use super::{abort_targets, resolve_project_dir, validate_project_dir};
     use std::path::PathBuf;
+
+    #[test]
+    fn abort_targets_selects_one_or_all() {
+        let live = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        // Some(id) → just that run (acceptance E4: aborting one leaves others).
+        assert_eq!(abort_targets(&live, Some("b")), vec!["b".to_string()]);
+        // An unknown id aborts nothing.
+        assert_eq!(abort_targets(&live, Some("zzz")), Vec::<String>::new());
+        // None → every live run (single-session UI default).
+        assert_eq!(abort_targets(&live, None), live);
+    }
 
     #[test]
     fn validate_project_dir_gates_blank_and_missing() {

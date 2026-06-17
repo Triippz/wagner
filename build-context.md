@@ -71,16 +71,24 @@ Plans live in `specs/<NNN>-<slug>/plan.md`. Each gets acceptance tests first.
 
 ## Current position
 
-**Phase A done. Executing Plan 003, Step 1** (Run-as-session fields + schema).
-Background sonnet agents are authoring `specs/004-vault-v1/plan.md` and
-`specs/007-voice/plan.md` (independent; land when done).
+**Phase A done. Plan 003 in progress — Steps 1 & 2 committed.** Plans 004
+(Vault) + 007 (Voice) authored + committed (ready for their own build later).
+
+Done so far (commits on `feat/autonomous-build`):
+- ✅ Step 1: Run carries session fields (project_dir/name/updated_at/goals) +
+  schema (optional) + RunSnapshot. `af9d9d5`.
+- ✅ Step 2: RunManager Option→HashMap (concurrent sessions); insert not replace;
+  abort/steer take optional run_id; `abort_targets` helper + test. `make verify`✓.
 
 **Immediate next actions:**
-1. 003 Step 1 (TDD): add `project_dir`, `name`, `updated_at`, `goals` to `Run`
-   (`edge/host/src/state/run.rs`) + `edge/host/schemas/run-state.schema.json` +
-   `RunSnapshot` (`edge/ui/store/types.ts`). Red test → green → commit.
-2. Continue 003 steps 2→10 per `specs/003-*/plan.md`, `make verify`+commit each.
-3. At 003 end: `make accept`; then start Plan 004 (Vault) / 007 (Voice).
+1. Step 3 (TDD): `list_runs` + `get_run` IPC. `store::list_summaries(runs_root)`
+   reading `{app_data}/runs/*/state.json` → `RunSummary` newest-first (skip
+   corrupt dirs); shell commands + register in invoke_handler; bridge helpers.
+2. Step 4: `resume_run` (load → rebuild pool/gate → re-enter loop via a shared
+   `spawn_run_loop` helper extracted from start_run).
+3. Step 5: `add_goal`. Step 6: ipc.ts command-name fix + optional guardrails.
+   Steps 7–10: reducer runs map + selectors, consumers, Composer, SessionRail.
+4. At 003 end: `make accept`; then build Plan 004 / 007.
 
 ## How to resume after a compaction
 
