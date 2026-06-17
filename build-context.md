@@ -107,10 +107,15 @@ hub-E2E, Graph/Vault browser (005), Distributed sync v1 (006), Hub vault +
 GossipSyncAdapter + IrohDocsStore (008). All on `feat/autonomous-build`;
 `make verify` + `make hub-e2e` green.
 
-**Next, in roadmap order:**
-1. **E2E breadth** — expand UI journey to cover session rail/resume/add-goal/
-   multi-session and vault browser. Run `make accept` to gate the full journey.
-2. **Docker / hub production hardening** — any remaining items from devex lane.
+**Post-roadmap hardening (operator-requested "continue to 100%"):**
+- [x] **n0 relays + live two-peer sync E2E** — `make sync-e2e` passes live over n0
+  (commit `9bbb70a`); `vault_relay_mode()` seam, see `memory/008`.
+- [ ] **Real STT/TTS wiring** — HttpStt/HttpTts against faster-whisper + Kokoro
+  HTTP sidecars behind the existing voice trait seam (fakes stay for offline tests).
+- [ ] **macOS native GUI E2E** — Accessibility-API (osascript/cliclick) smoke vs
+  the real `make edge` window (tauri-driver unavailable on macOS; system E2E via
+  sync-e2e/hub-e2e already real). Plus broaden the `?mock` UI journey across
+  rail/resume/add-goal/multi-session + vault browser.
 
 **Resume protocol:** `git log --oneline -40` shows every step. Re-run `make verify`
 (+ `make hub-e2e`, `make accept`), then continue at the first unbuilt item above.

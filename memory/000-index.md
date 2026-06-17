@@ -20,6 +20,7 @@ The live build state lives in `../build-context.md`.
 - [[005-repo-commit-hooks]] — git hook constraints; commits land on feat/autonomous-build.
 - [[006-resume-defaults]] — resume_run uses default roster/no suite (not persisted on Run).
 - [[007-worktree-lane-integration]] — worktree lanes branch from base; integrate via conflict-resolution.
+- [[008-n0-relays]] — vault sync uses n0 public relays (RelayMode::Default) via vault_relay_mode() seam.
 
 ## Conventions
 
