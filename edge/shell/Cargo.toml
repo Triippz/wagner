@@ -12,6 +12,15 @@ publish = false
 name = "wagner_edge_shell"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Serve the embedded `frontendDist` via the `tauri://` asset protocol instead of
+# the `devUrl` dev server. Tauri's `is_dev()` is `!cfg!(feature = "custom-protocol")`,
+# so a bare `cargo run` without this feature loads `localhost:1420` (the vite dev
+# server) — blank unless `tauri dev` is serving it. `make platform-edge` enables
+# this to launch against the built bundle with no dev server / tauri-cli needed.
+# `cargo tauri dev` (hot-reload) intentionally omits it and uses `devUrl`.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
