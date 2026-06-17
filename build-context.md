@@ -107,15 +107,28 @@ hub-E2E, Graph/Vault browser (005), Distributed sync v1 (006), Hub vault +
 GossipSyncAdapter + IrohDocsStore (008). All on `feat/autonomous-build`;
 `make verify` + `make hub-e2e` green.
 
-**Post-roadmap hardening (operator-requested "continue to 100%"):**
+**Post-roadmap hardening (operator-requested "continue to 100%") — ALL DONE:**
 - [x] **n0 relays + live two-peer sync E2E** — `make sync-e2e` passes live over n0
   (commit `9bbb70a`); `vault_relay_mode()` seam, see `memory/008`.
-- [ ] **Real STT/TTS wiring** — HttpStt/HttpTts against faster-whisper + Kokoro
-  HTTP sidecars behind the existing voice trait seam (fakes stay for offline tests).
-- [ ] **macOS native GUI E2E** — Accessibility-API (osascript/cliclick) smoke vs
-  the real `make edge` window (tauri-driver unavailable on macOS; system E2E via
-  sync-e2e/hub-e2e already real). Plus broaden the `?mock` UI journey across
-  rail/resume/add-goal/multi-session + vault browser.
+- [x] **Real STT/TTS wiring** — `HttpStt`/`HttpTts` (faster-whisper + Kokoro HTTP
+  sidecars) behind the voice trait seam; hermetic port-0 mock tests in `make
+  verify`; `make voice-e2e` (#[ignore]) for real sidecars. Commit `0298158`.
+- [x] **E2E breadth + macOS native GUI smoke** — `?mock` journey now covers
+  multi-session rail + focus-switch + Console/Vault tab round-trip (in `make
+  accept`); `edge/ui/scripts/native-smoke.sh` + `make gui-smoke` launch the real
+  Tauri window and assert via macOS Accessibility/`osascript` (NOT in verify;
+  needs a display + Accessibility permission granted to the terminal — documented
+  in `docs/development.md`). Commit `f415ef7`.
+
+## BUILD COMPLETE
+Every roadmap phase + all operator-requested hardening is implemented and green.
+58 commits on `feat/autonomous-build`; `make verify` / `make accept` / `make
+hub-e2e` / `make sync-e2e` all pass. Operator: fast-forward `main`
+(`git checkout main && git merge --ff-only feat/autonomous-build`).
+Remaining is environment/ops only (not code): grant the terminal Accessibility
+permission to run `make gui-smoke`; stand up real faster-whisper/Kokoro sidecars
+for `make voice-e2e`; point at our own iroh relay when ready (one line in
+`vault_relay_mode()`).
 
 **Resume protocol:** `git log --oneline -40` shows every step. Re-run `make verify`
 (+ `make hub-e2e`, `make accept`), then continue at the first unbuilt item above.
