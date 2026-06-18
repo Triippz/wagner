@@ -48,6 +48,10 @@ function voiceLabel(s: VoiceState): string {
 function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
   const [voiceState, setVoiceState] = useState<VoiceState>("off");
   const [toggling, setToggling] = useState(false);
+  // The backend's error text when enabling failed (e.g. a sidecar binary that
+  // couldn't start) — surfaced as the toggle's tooltip so the operator can tell
+  // *what* failed instead of a bare "Voice error" (B1).
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Track mount state so async toggle callbacks don't call setState after unmount.
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -78,6 +82,7 @@ function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
     }
     const turningOn = voiceState !== "on";
     setToggling(true);
+    setErrorMsg(null);
     setVoiceState(turningOn ? "starting" : "off");
     cmd.voiceSetEnabled(turningOn)
       .then(({ enabled, ready }) => {
@@ -94,13 +99,16 @@ function useVoiceToggle(onOpenSettings: OpenVoiceSettings) {
           setVoiceState("models-needed");
           onOpenSettings();
         } else {
+          // Keep the backend's reason (e.g. "sidecar … could not start") so the
+          // tooltip names what failed rather than a generic "Voice error".
+          setErrorMsg(turningOn ? msg : null);
           setVoiceState(turningOn ? "error" : "off");
         }
       })
       .finally(() => { if (mountedRef.current) setToggling(false); });
   };
 
-  return { voiceState, toggling, toggle };
+  return { voiceState, toggling, toggle, errorMsg };
 }
 
 interface Props {
@@ -113,7 +121,7 @@ interface Props {
 }
 
 export function TopBar({ run, needsYou, busy, onAbort, onNewRun, onOpenVoiceSettings }: Props) {
-  const { voiceState, toggling, toggle } = useVoiceToggle(onOpenVoiceSettings);
+  const { voiceState, toggling, toggle, errorMsg } = useVoiceToggle(onOpenVoiceSettings);
   const { tone, label } = statusTone(run, needsYou);
   const cost = run?.guardrails.cost;
   const used = cost?.used ?? 0;
@@ -165,7 +173,8 @@ export function TopBar({ run, needsYou, busy, onAbort, onNewRun, onOpenVoiceSett
           className="btn voice-toggle"
           data-variant="ghost"
           data-voice={voiceState}
-          aria-label={voiceLabel(voiceState)}
+          aria-label={voiceState === "error" && errorMsg ? errorMsg : voiceLabel(voiceState)}
+          title={voiceState === "error" && errorMsg ? errorMsg : undefined}
           disabled={toggling}
           onClick={toggle}
         >

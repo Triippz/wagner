@@ -46,6 +46,25 @@ fn synthesize_produces_nonempty_wav() {
     });
     assert!(ready, "tts sidecar did not become ready within 10 s");
 
+    // /health must answer 200 (B1): the shell's sidecar health-wait polls it,
+    // and before this route existed it 404'd, so voice-enable always failed.
+    {
+        let mut s = TcpStream::connect(&addr).expect("connect for /health");
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        use std::io::Write as _;
+        s.write_all(
+            format!("GET /health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+        .expect("send /health");
+        let mut resp = String::new();
+        let _ = s.read_to_string(&mut resp);
+        assert!(
+            resp.starts_with("HTTP/1.1 200"),
+            "GET /health must return 200, got: {}",
+            resp.lines().next().unwrap_or("<empty>")
+        );
+    }
+
     // Send a minimal POST /v1/audio/speech request.
     let body = r#"{"model":"kokoro","input":"Hello world.","voice":"af_heart"}"#;
     let request = format!(

@@ -39,3 +39,10 @@ futures = { workspace = true }
 ulid = { workspace = true }
 chrono = { workspace = true }
 shell-words = "1"
+
+# F38: force the main window's NSWindow collection behavior to FullScreenPrimary
+# so the green title-bar button enters a true macOS fullscreen Space (an
+# accessory/tray-only app doesn't get this by default). Already a transitive dep
+# of tao with the `NSWindow` feature, so this pulls in nothing new.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = ["NSWindow"] }

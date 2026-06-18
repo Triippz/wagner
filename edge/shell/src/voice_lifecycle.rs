@@ -101,7 +101,12 @@ pub async fn spawn_sidecars(
             "--model", &paths.stt.to_string_lossy(),
         ])
         .spawn()
-        .map_err(|e| format!("failed to spawn whisper-server: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "voice sidecar 'whisper-server' could not start ({e}) — the binary \
+                 is missing or not runnable (dev: run `make voice-up`; bundle: `make edge-bundle`)"
+            )
+        })?;
 
     // Spawn TTS sidecar.
     let (_tts_rx, tts_child): (tauri::async_runtime::Receiver<CommandEvent>, CommandChild) = shell
@@ -114,7 +119,12 @@ pub async fn spawn_sidecars(
             "--voices", &paths.tts_voices.to_string_lossy(),
         ])
         .spawn()
-        .map_err(|e| format!("failed to spawn wagner-tts-sidecar: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "voice sidecar 'wagner-tts-sidecar' could not start ({e}) — the binary \
+                 is missing or not runnable (dev: run `make voice-up`; bundle: `make edge-bundle`)"
+            )
+        })?;
 
     // Store handles before health-wait so they are killed on error too (R2).
     {
@@ -152,6 +162,30 @@ pub fn kill_sidecars(sc: &tauri::State<'_, SidecarState>) {
             eprintln!("[voice] sidecar kill error: {e}");
         }
     }
+}
+
+/// Are both voice sidecars already serving on their loopback ports? This is true
+/// when they were started out-of-band — `make voice-up` / `make run` runs them
+/// natively. In that case the shell adopts them instead of spawning its own,
+/// which avoids a port clash on :8771/:8772 and makes voice work on the dev path,
+/// where the Tauri-bundled (`externalBin`) binaries are absent (B1).
+pub async fn sidecars_healthy() -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build()
+    else {
+        return false;
+    };
+    for url in [
+        "http://127.0.0.1:8771/health",
+        "http://127.0.0.1:8772/health",
+    ] {
+        match client.get(url).send().await {
+            Ok(resp) if resp.status().is_success() => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// Poll `url` until it returns an HTTP 200, up to `HEALTH_POLL_ATTEMPTS` tries

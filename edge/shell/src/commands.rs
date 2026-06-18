@@ -1102,10 +1102,21 @@ pub async fn voice_set_enabled(
             return Ok(vm.status().into());
         }
 
+        // Adopt sidecars already serving on :8771/:8772 (started out-of-band by
+        // `make voice-up` / `make run`) instead of spawning our own. This makes
+        // voice work on the dev path — where the Tauri-bundled binaries are absent
+        // — and avoids a double-spawn port clash (B1). We did not start them, so
+        // toggling voice off won't kill them; the dev script owns their lifecycle.
+        if crate::voice_lifecycle::sidecars_healthy().await {
+            vm.set_enabled(true);
+            vm.set_ready(true);
+            return Ok(vm.status().into());
+        }
+
         // Gate: all model files must be present before spawning sidecars.
         let dir = models_dir(&app)?;
         if !wagner_edge_host::voice::all_models_ready(&dir) {
-            return Err("models not ready — call voice_download_models first".into());
+            return Err("models not ready — open Voice settings to download them".into());
         }
 
         // Mark enabled now so the UI reflects "starting" even before ready.
