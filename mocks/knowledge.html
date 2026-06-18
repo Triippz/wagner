@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wagner — Knowledge (mock)</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .shell{display:grid;grid-template-columns:300px 1fr 384px;grid-template-rows:60px 1fr;height:100vh}
+  /* top bar */
+  .top{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 18px}
+  .hex{width:30px;height:30px;border-radius:9px;background:var(--card);display:grid;place-items:center;color:var(--lime);font-size:15px}
+  .top .tabs{margin:0 auto;display:flex;align-items:center;gap:8px}
+  .top .tabs .ic{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-3);cursor:pointer}
+  .top .right{display:flex;align-items:center;gap:8px}
+  .iconbtn{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-2);cursor:pointer;position:relative}
+  .iconbtn:hover{color:var(--ink)}
+  .iconbtn .badge{position:absolute;top:-4px;right:-4px;background:var(--alert);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:grid;place-items:center;padding:0 3px}
+  /* columns */
+  .col{padding:16px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+  .col.l{gap:13px}
+  /* center */
+  .center{position:relative;overflow:hidden}
+  .center .orb-wrap{position:absolute;inset:0}
+  /* search input */
+  .search-wrap{position:relative}
+  .search-wrap .ic{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--ink-3);font-size:14px;pointer-events:none}
+  .search-wrap input{width:100%;background:var(--card);border:1px solid var(--line-soft);border-radius:999px;padding:9px 13px 9px 34px;color:var(--ink);font:inherit;font-size:13px;outline:none}
+  .search-wrap input::placeholder{color:var(--ink-3)}
+  .search-wrap input:focus{border-color:var(--line)}
+  /* scope chips row */
+  .scope-chips{display:flex;flex-wrap:wrap;gap:7px}
+  /* newbtn from agents.html */
+  .newbtn{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:14px;border:1px dashed var(--line);color:var(--lime);font-weight:500;cursor:pointer;background:transparent}
+  .newbtn:hover{background:var(--lime-bg);border-color:transparent}
+  /* toggle row */
+  .switch{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line-soft)}
+  .switch:first-of-type{border-top:0}
+  .switch .lab{color:var(--ink-2);font-size:13px}
+  .switch .lab small{display:block;color:var(--ink-3);font-size:11px;margin-top:1px}
+  .tg{width:38px;height:22px;border-radius:999px;background:var(--card-2);position:relative;flex:none;cursor:pointer}
+  .tg::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--ink-3);transition:.18s var(--ease)}
+  .tg.on{background:var(--lime)}
+  .tg.on::after{left:19px;background:var(--lime-ink)}
+  /* stats row */
+  .stats-row{display:flex;flex-direction:column;gap:5px}
+  .stats-row .sn{font-family:var(--mono);font-size:22px;font-weight:300;letter-spacing:-0.02em;color:var(--ink)}
+  .stats-row .sl{font-size:11.5px;color:var(--ink-3);margin-top:2px;line-height:1.65}
+  /* legend */
+  .legend{display:flex;flex-direction:column;gap:8px}
+  .legend-item{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-2)}
+  /* center overlays */
+  .nodelabel{position:absolute;z-index:var(--z-orb);display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);text-shadow:0 1px 10px var(--bg)}
+  .scrubwrap{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:var(--z-orb)}
+  .floor-line{position:absolute;left:50%;bottom:62px;transform:translateX(-50%);z-index:var(--z-orb);color:var(--ink-3);font-size:11.5px;white-space:nowrap;text-shadow:0 1px 10px var(--bg);text-align:center}
+  /* right: inspector */
+  .inspector-title{font-size:16px;font-weight:600;letter-spacing:-0.01em;color:var(--ink);margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .kv-rows{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+  .kv{display:flex;justify-content:space-between;font-size:12px}
+  .kv .k{color:var(--ink-3)}
+  .kv .v{color:var(--ink-2);font-weight:500;text-align:right;max-width:65%}
+  .body-text{color:var(--ink-2);font-size:12.5px;line-height:1.55;margin:12px 0}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:999px;padding:8px 16px;border:1px solid var(--line);background:var(--card);color:var(--ink-2);cursor:pointer}
+  .btn:hover{color:var(--ink);border-color:var(--line)}
+  .btn.primary{background:var(--lime);color:var(--lime-ink);border-color:transparent;font-weight:600}
+  /* review queue */
+  .review-item{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line-soft)}
+  .review-item:first-of-type{border-top:0}
+  .review-item .ri-name{font-size:12.5px;color:var(--ink-2);flex:1;min-width:0;padding-right:8px;line-height:1.4}
+  .review-item .ri-meta{font-size:11px;color:var(--ink-3);margin-top:1px}
+  .review-item .ri-acts{display:flex;gap:6px;flex:none}
+  /* dock from agents.html */
+  .dock{position:fixed;right:18px;bottom:18px;z-index:var(--z-dock);display:flex;align-items:flex-end;gap:12px}
+  .dock .bubble{max-width:312px;background:oklch(0.21 0.004 140 / 0.55);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid oklch(1 0 0 / .08);border-radius:16px 16px 4px 16px;padding:11px 14px;color:var(--ink);font-size:12.5px;line-height:1.45;box-shadow:var(--shadow)}
+  .dock .bubble .who{font-size:10.5px;color:var(--ink-3);margin-bottom:3px;display:flex;align-items:center;gap:6px}
+  .dock .companion{position:relative;width:78px;height:78px;flex:none}
+  .dock .companion canvas{width:100%;height:100%}
+  .dock .companion .hint{position:absolute;bottom:-17px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9.5px;color:var(--ink-3);white-space:nowrap}
+  /* callout x button */
+  .callout .x{position:absolute;top:13px;right:14px;color:var(--ink-3);font-size:12px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- TOP -->
+  <header class="top">
+    <a class="hex" href="dashboard.html">⬡</a>
+    <span class="pill ghost">Today ▾</span>
+    <nav class="tabs">
+      <span class="ic">⌕</span>
+      <a class="pill ghost" href="dashboard.html">Command Deck</a>
+      <a class="pill ghost" href="coding.html">Coding</a>
+      <a class="pill ghost" href="agents.html">Agents</a>
+      <a class="pill ghost" href="workflows.html">Workflows</a>
+      <a class="pill lime" href="knowledge.html">Knowledge</a>
+    </nav>
+    <div class="right">
+      <a class="iconbtn" href="settings.html">⚙</a>
+      <span class="iconbtn">▤</span>
+      <span class="iconbtn">⌃<span class="badge">2</span></span>
+    </div>
+  </header>
+
+  <!-- LEFT -->
+  <div class="col l">
+
+    <!-- search -->
+    <div class="search-wrap">
+      <span class="ic">⌕</span>
+      <input type="text" placeholder="Search all knowledge…">
+    </div>
+
+    <!-- scope chips -->
+    <div class="scope-chips">
+      <span class="tab on" style="padding:7px 13px;font-size:12px">All</span>
+      <span class="tab" style="padding:7px 13px;font-size:12px">Code</span>
+      <span class="tab" style="padding:7px 13px;font-size:12px">Slack</span>
+      <span class="tab" style="padding:7px 13px;font-size:12px">Notion</span>
+      <span class="tab" style="padding:7px 13px;font-size:12px">Email</span>
+      <span class="tab" style="padding:7px 13px;font-size:12px">People</span>
+      <span class="tab" style="padding:7px 13px;font-size:12px">GitLab</span>
+    </div>
+
+    <!-- add learning -->
+    <div class="newbtn">＋ Add learning</div>
+
+    <!-- auto-capture card -->
+    <div class="card">
+      <div class="switch" style="padding-top:0">
+        <div class="lab">Auto-capture<small>Wagner saves verified learnings from runs automatically. 18 added this week.</small></div>
+        <span class="tg on"></span>
+      </div>
+    </div>
+
+    <!-- stats -->
+    <div class="card">
+      <div class="stats-row">
+        <span class="sn mono">1,284</span>
+        <span class="sl">notes total</span>
+      </div>
+      <div style="display:flex;gap:18px;margin-top:10px;flex-wrap:wrap">
+        <div>
+          <span class="mono" style="font-size:18px;font-weight:300;color:var(--ok)">312</span>
+          <span style="font-size:11px;color:var(--ink-3);display:block">verified</span>
+        </div>
+        <div>
+          <span class="mono" style="font-size:18px;font-weight:300;color:var(--warn)">14</span>
+          <span style="font-size:11px;color:var(--ink-3);display:block">need review</span>
+        </div>
+        <div>
+          <span class="mono" style="font-size:18px;font-weight:300;color:var(--alert)">2</span>
+          <span style="font-size:11px;color:var(--ink-3);display:block">disputed</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- legend -->
+    <div class="card">
+      <div style="font-size:12px;color:var(--ink-3);margin-bottom:10px">Node color</div>
+      <div class="legend">
+        <div class="legend-item"><span class="dot lime"></span>Verified</div>
+        <div class="legend-item"><span class="dot warn"></span>Needs review</div>
+        <div class="legend-item"><span class="dot alert"></span>Disputed</div>
+        <div class="legend-item"><span class="dot mut"></span>Base note</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- CENTER: knowledge plexus -->
+  <div class="center">
+    <div class="orb-wrap"><canvas id="plexus"></canvas></div>
+
+    <!-- callout: verified note -->
+    <div class="callout" style="top:28%;left:18%">
+      <span class="x">✕</span>
+      <div class="ch">Abort must cancel the run <span class="risk ok">verified</span></div>
+      <div class="row"><span>Source</span><b>this session</b></div>
+      <div class="row"><span>Links</span><b>2 notes</b></div>
+      <div class="row"><span>Captured</span><b>auto · 22:41</b></div>
+    </div>
+
+    <!-- callout: needs review -->
+    <div class="callout" style="top:56%;left:9%">
+      <span class="x">✕</span>
+      <div class="ch">Sam prefers async updates <span class="risk warn">needs review</span></div>
+      <div class="row"><span>From</span><b>Slack</b></div>
+      <div class="row"><span>Type</span><b>teammate note</b></div>
+    </div>
+
+    <!-- node label: disputed -->
+    <div class="nodelabel" style="top:46%;right:20%;color:var(--alert)"><span class="dot alert"></span>Disputed: relay choice</div>
+
+    <!-- floor line -->
+    <div class="floor-line">1,284 notes · drag to explore · click a node to inspect</div>
+
+    <!-- scrubber used as time filter -->
+    <div class="scrubwrap">
+      <div class="scrub">
+        <span class="seg"><b>Today</b></span>
+        <span class="ticks"><i class="on"></i><i></i><i></i><i></i><i></i></span>
+        <span class="seg">This week</span>
+        <span class="seg">All</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: note inspector -->
+  <div class="col r">
+
+    <!-- selected note -->
+    <div class="card">
+      <div class="inspector-title">
+        Abort must cancel the run
+        <span class="pill lime">verified</span>
+      </div>
+      <div class="kv-rows">
+        <div class="kv"><span class="k">Source</span><span class="v">this session</span></div>
+        <div class="kv"><span class="k">Captured</span><span class="v">auto-captured · 2026-06-18 22:41</span></div>
+        <div class="kv"><span class="k">Links</span><span class="v">2 related notes</span></div>
+        <div class="kv"><span class="k">Used</span><span class="v">in 3 runs</span></div>
+      </div>
+      <div style="height:1px;background:var(--line-soft);margin:4px 0 10px"></div>
+      <p class="body-text">Clicking Abort on a running run was inert — the killed task never emitted a terminal run event. The fix wires aborted() → emit + persist a terminal run. Verified by test aborted_marks_run_terminal.</p>
+      <div class="actions">
+        <button class="btn">Edit</button>
+        <button class="btn">Open links</button>
+      </div>
+    </div>
+
+    <!-- review queue -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <span style="font-size:14px;font-weight:500;color:var(--ink)">Needs your review</span>
+        <span class="pill ghost" style="font-size:11px;padding:4px 11px;color:var(--warn)">14</span>
+      </div>
+      <div class="review-item">
+        <div>
+          <div class="ri-name">Sam prefers async updates</div>
+          <div class="ri-meta">from Slack · inferred</div>
+        </div>
+        <div class="ri-acts">
+          <button class="btn" style="padding:5px 11px;font-size:11.5px">Verify</button>
+          <button class="btn" style="padding:5px 11px;font-size:11.5px;color:var(--ink-3)">Dismiss</button>
+        </div>
+      </div>
+      <div class="review-item">
+        <div>
+          <div class="ri-name">Relay choice</div>
+          <div class="ri-meta">from this session · disputed</div>
+        </div>
+        <div class="ri-acts">
+          <button class="btn" style="padding:5px 11px;font-size:11.5px">Verify</button>
+          <button class="btn" style="padding:5px 11px;font-size:11.5px;color:var(--ink-3)">Dismiss</button>
+        </div>
+      </div>
+      <div class="review-item">
+        <div>
+          <div class="ri-name">Voice sidecar should stay on PATH</div>
+          <div class="ri-meta">from dev run · inferred</div>
+        </div>
+        <div class="ri-acts">
+          <button class="btn" style="padding:5px 11px;font-size:11.5px">Verify</button>
+          <button class="btn" style="padding:5px 11px;font-size:11.5px;color:var(--ink-3)">Dismiss</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- dock companion -->
+<div class="dock">
+  <div class="bubble">
+    <div class="who"><span class="dot lime"></span>Wagner</div>
+    1,284 notes. 14 need review, 2 are disputed. I auto-captured 18 this week from your runs — open any to verify or edit it.
+  </div>
+  <div class="companion"><canvas id="dorb"></canvas><span class="hint">hold ⌥Space</span></div>
+</div>
+
+<script type="module">
+  import { mountGraph } from './graph.js';
+  const g = mountGraph(document.getElementById('plexus'), { count: 210, fill: 0.42 });
+  const d = mountGraph(document.getElementById('dorb'), { count: 80, fill: 0.42, links: 3 });
+  d.set({ speaking: true });
+</script>
+</body>
+</html>

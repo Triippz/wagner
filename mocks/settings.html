@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wagner — Settings (mock)</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .shell{display:grid;grid-template-rows:58px 1fr;height:100vh}
+  .top{display:flex;align-items:center;gap:12px;padding:0 18px}
+  .hex{width:30px;height:30px;border-radius:9px;background:var(--card);display:grid;place-items:center;color:var(--lime);font-size:15px}
+  .top .tabs{margin:0 auto;display:flex;align-items:center;gap:8px}
+  .top .tabs .ic{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-3)}
+  .top .right{display:flex;align-items:center;gap:8px}
+  .iconbtn{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-2);cursor:pointer;position:relative}
+  .iconbtn .badge{position:absolute;top:-4px;right:-4px;background:var(--alert);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:grid;place-items:center;padding:0 3px}
+  /* body: list | editor */
+  .body{display:grid;grid-template-columns:288px 1fr;min-height:0}
+  .list{border-right:1px solid var(--line-soft);overflow:auto;padding:16px 14px;display:flex;flex-direction:column;gap:9px}
+  .lh{font-size:11px;font-weight:600;color:var(--ink-3);padding:6px 4px 2px}
+  .arow{display:flex;align-items:center;gap:11px;padding:11px;border-radius:13px;cursor:pointer;border:1px solid transparent}
+  .arow:hover{background:var(--card)} .arow.on{background:var(--card);border-color:var(--line)}
+  .av{width:32px;height:32px;border-radius:10px;background:var(--card-2);display:grid;place-items:center;font-size:12px;color:var(--ink-2);font-weight:600;flex:none}
+  .arow.on .av{background:var(--lime);color:var(--lime-ink)}
+  .arow .n{font-weight:500;color:var(--ink);font-size:13.5px} .arow .m{color:var(--ink-3);font-size:11px;margin-top:1px}
+  /* editor */
+  .editor{overflow:auto;padding:20px 24px}
+  .ehead{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+  .ehead h1{font-size:21px;font-weight:600;letter-spacing:-0.02em} .ehead .sub{color:var(--ink-3);font-size:12.5px;margin-top:1px}
+  .ehead .acts{margin-left:auto;display:flex;gap:8px}
+  .btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:999px;padding:8px 16px;border:1px solid var(--line);background:var(--card);color:var(--ink-2);cursor:pointer}
+  .btn.primary{background:var(--lime);color:var(--lime-ink);border-color:transparent;font-weight:600}
+  .fl{font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .fl .hint{font-weight:400;color:var(--ink-3);font-size:11px}
+  .prompt{font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--ink-2);background:var(--bg-deep);border:1px solid var(--line-soft);border-radius:12px;padding:14px;min-height:100px;white-space:pre-wrap}
+  .opts{display:flex;flex-wrap:wrap;gap:8px}
+  .opt{font-size:12px;padding:8px 13px;border-radius:11px;background:var(--card-2);color:var(--ink-2);cursor:pointer;border:1px solid transparent}
+  .opt:hover{color:var(--ink)} .opt.on{background:var(--lime);color:var(--lime-ink);font-weight:600}
+  .note{color:var(--ink-3);font-size:11.5px;margin-top:11px;line-height:1.45}
+  /* text input */
+  .tinput{display:block;width:100%;background:var(--bg-deep);border:1px solid var(--line-soft);border-radius:var(--r-md);color:var(--ink);font:inherit;font-size:13.5px;padding:10px 13px;outline:none}
+  .tinput:focus{border-color:var(--line)}
+  /* preview bubble inline */
+  .preview-bubble{display:flex;align-items:flex-start;gap:10px;padding:13px;background:oklch(0.21 0.004 140 / 0.5);border:1px solid oklch(1 0 0 / .08);border-radius:14px}
+  .preview-bubble .who{font-size:10.5px;color:var(--ink-3);display:flex;align-items:center;gap:6px;margin-bottom:4px}
+  .preview-bubble .body-text{font-size:12.5px;color:var(--ink);line-height:1.5}
+  /* settings layout: stacked cards with gap */
+  .scards{display:flex;flex-direction:column;gap:16px}
+  /* dock */
+  .dock{position:fixed;right:18px;bottom:18px;z-index:var(--z-dock);display:flex;align-items:flex-end;gap:12px}
+  .dock .bubble{max-width:312px;background:oklch(0.21 0.004 140 / 0.55);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid oklch(1 0 0 / .08);border-radius:16px 16px 4px 16px;padding:11px 14px;color:var(--ink);font-size:12.5px;line-height:1.45;box-shadow:var(--shadow)}
+  .dock .bubble .who{font-size:10.5px;color:var(--ink-3);margin-bottom:3px;display:flex;align-items:center;gap:6px}
+  .dock .companion{position:relative;width:78px;height:78px;flex:none} .dock .companion canvas{width:100%;height:100%}
+  .dock .companion .hint{position:absolute;bottom:-17px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9.5px;color:var(--ink-3);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <a class="hex" href="dashboard.html">⬡</a>
+    <span class="pill ghost">Today ▾</span>
+    <nav class="tabs">
+      <span class="ic">⌕</span>
+      <a class="pill ghost" href="dashboard.html">Command Deck</a>
+      <a class="pill ghost" href="coding.html">Coding</a>
+      <a class="pill ghost" href="agents.html">Agents</a>
+      <a class="pill ghost" href="workflows.html">Workflows</a>
+      <a class="pill ghost" href="knowledge.html">Knowledge</a>
+    </nav>
+    <div class="right">
+      <a class="iconbtn" href="settings.html" style="color:var(--lime)">⚙</a>
+      <span class="iconbtn">▤</span>
+      <span class="iconbtn">⌃<span class="badge">2</span></span>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- section nav -->
+    <aside class="list">
+      <div class="lh">SETTINGS</div>
+      <div class="arow on">
+        <span class="av">✦</span>
+        <div><div class="n">Assistant</div><div class="m">name · voice · style</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">♪</span>
+        <div><div class="n">Voice &amp; audio</div><div class="m">STT · TTS · hotword</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">⬡</span>
+        <div><div class="n">Models &amp; providers</div><div class="m">Claude · Codex · GLM · self-hosted</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">⇄</span>
+        <div><div class="n">Connectors</div><div class="m">Slack · Jira · Notion · GitLab</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">⬡</span>
+        <div><div class="n">Knowledge</div><div class="m">auto-capture</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">◑</span>
+        <div><div class="n">Appearance</div><div class="m">theme · density</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">⊞</span>
+        <div><div class="n">System</div><div class="m">fullscreen · menu-bar · notifications</div></div>
+      </div>
+      <div class="arow">
+        <span class="av">○</span>
+        <div><div class="n">Account</div><div class="m">self-host · members</div></div>
+      </div>
+    </aside>
+
+    <!-- assistant panel -->
+    <main class="editor">
+      <div class="ehead">
+        <div>
+          <h1>Assistant</h1>
+          <div class="sub">How Wagner identifies and speaks — applies everywhere in the app.</div>
+        </div>
+        <div class="acts">
+          <button class="btn primary">Save</button>
+        </div>
+      </div>
+
+      <div class="scards">
+
+        <!-- Identity -->
+        <div class="card">
+          <div class="fl">Name</div>
+          <input class="tinput" type="text" value="Wagner" autocomplete="off" spellcheck="false">
+          <div class="note">Used app-wide. This is the one name and voice your assistant uses everywhere.</div>
+        </div>
+
+        <!-- Voice -->
+        <div class="card">
+          <div class="fl">Voice</div>
+          <div class="opts">
+            <span class="opt on">Kokoro · calm</span>
+            <span class="opt">Kokoro · warm</span>
+            <span class="opt">Kokoro · crisp</span>
+            <span class="opt">System voice</span>
+          </div>
+          <div style="margin-top:12px"><button class="btn">▶ Preview</button></div>
+          <div class="note">Text-to-speech voice. Model: Kokoro q8 — ready.</div>
+        </div>
+
+        <!-- Speaking style -->
+        <div class="card">
+          <div class="fl">Personality</div>
+          <div class="opts" style="margin-bottom:12px">
+            <span class="opt on">Engineer — explicit, low-metaphor</span>
+            <span class="opt">Concise</span>
+            <span class="opt">Warm</span>
+            <span class="opt">Custom…</span>
+          </div>
+          <div class="fl" style="margin-bottom:6px">Style prompt <span class="hint">applied to every response</span></div>
+          <div class="prompt">State exactly what happened and what's needed. No fluff. No implicit acknowledgement. Never say 'I've gone ahead and…'.</div>
+          <div class="note">Wagner only speaks in the selected style.</div>
+        </div>
+
+        <!-- Preview -->
+        <div class="card">
+          <div class="fl">Preview</div>
+          <div class="preview-bubble">
+            <div>
+              <div class="who"><span class="dot lime"></span>Wagner</div>
+              <div class="body-text">Run 01KVC8 finished. 2 files changed. Tests passed. One item needs you: approve the Slack summary before it posts.</div>
+            </div>
+          </div>
+          <div class="note">Engineer style — explicit, low-metaphor. This is how Wagner speaks everywhere in the app.</div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="dock">
+  <div class="bubble">
+    <div class="who"><span class="dot lime"></span>Wagner</div>
+    <span id="dsay">Your assistant is named Wagner and speaks in the Engineer style — explicit, low-metaphor. This name and voice apply everywhere.</span>
+  </div>
+  <div class="companion"><canvas id="dorb"></canvas><span class="hint">hold ⌥Space</span></div>
+</div>
+
+<script type="module">
+  import { mountGraph } from './graph.js';
+  const g = mountGraph(document.getElementById('dorb'), { count: 80, fill: 0.42, links: 3 });
+  g.set({ speaking: true });
+</script>
+</body>
+</html>

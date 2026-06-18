@@ -64,6 +64,8 @@ flowchart TD
 
 ## 3. The spine: event → reducer → projection
 
+> **Deepened in [`runtime-architecture.md`](runtime-architecture.md):** the full participant bus (agents · connectors · scheduler as pub/sub participants), the strongly-typed envelope, participant identity, and the device / cloud / teams model. The goal loop is one participant there, not the center.
+
 Everything the UI shows is a **projection of an event stream**. The host emits
 typed events; a transport carries them; a transport-blind reducer folds them into
 state the React tree renders. This is why the same UI works over IPC (desktop)

@@ -1,0 +1,124 @@
+/* Wagner design system — LOCKED 2026-06-18 to the "biometric deep-scan" reference.
+   Near-black + dot grid, soft dark rounded cards, chartreuse-lime signature,
+   light-weight numbers, the knowledge-graph plexus as centerpiece. Bespoke,
+   calm, futurist, not overwhelming. Lifts into edge/ui later.
+   Type: Hanken Grotesk (calm modern humanist) + Geist Mono for IDs/data.
+   Color in CSS = oklch; canvas fills use hsla (engine support). */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap');
+
+:root{
+  color-scheme: dark;
+  /* near-black field */
+  --bg:        oklch(0.115 0.004 140);
+  --bg-deep:   oklch(0.085 0.004 140);
+  --dot:       oklch(1 0 0 / 0.035);
+  /* soft cards (slightly lifted, faint warm-neutral) */
+  --card:      oklch(0.175 0.004 140);
+  --card-2:    oklch(0.205 0.004 140);
+  --card-olive:oklch(0.26 0.045 122 / 0.45);   /* the featured tinted card */
+  --surface:   var(--card);   --surface-2: var(--card-2);   --surface-3: oklch(0.245 0.004 140);
+  --line:      oklch(0.30 0.004 140);
+  --line-soft: oklch(0.235 0.004 140);
+  --border: var(--line); --border-soft: var(--line-soft);
+  /* ink — high contrast (AA + ADHD); light numbers still read */
+  --ink:   oklch(0.975 0.002 140);
+  --ink-2: oklch(0.74 0.004 140);
+  --ink-3: oklch(0.55 0.005 140);
+  --ink-dim: var(--ink-2); --ink-faint: var(--ink-3);
+  /* signature — chartreuse lime */
+  --lime:      oklch(0.90 0.185 124);
+  --lime-deep: oklch(0.78 0.16 124);
+  --lime-bg:   oklch(0.55 0.10 124 / 0.16);
+  --lime-ink:  oklch(0.18 0.03 140);            /* dark text on lime pills */
+  --accent: var(--lime); --accent-strong: var(--lime); --accent-bg: var(--lime-bg);
+  --teal: var(--lime); --teal-dim: var(--lime-deep); --teal-bg: var(--lime-bg); /* coding.html aliases */
+  /* semantic */
+  --ok:    oklch(0.80 0.15 150);
+  --warn:  oklch(0.85 0.15 92);
+  --alert: oklch(0.64 0.20 25);  --alert-bg: oklch(0.45 0.14 25 / 0.18);
+  --success: var(--ok);
+
+  --font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --font-sans: var(--font); --font-mono: var(--mono);
+  --r-sm: 10px; --r-md: 14px; --r-lg: 18px; --r-card: 20px; --r-xl: 26px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --shadow: 0 22px 60px -22px oklch(0 0 0 / 0.75);
+  --shadow-pop: 0 18px 50px -16px oklch(0 0 0 / 0.7);
+  --z-rail: 10; --z-dock: 20; --z-orb: 30; --z-overlay: 40; --z-toast: 60;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+a{color:inherit;text-decoration:none}
+body{
+  background:
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0) 0 0 / 24px 24px,
+    radial-gradient(120% 90% at 50% 0%, oklch(0.16 0.006 140) 0%, var(--bg) 45%, var(--bg-deep) 100%);
+  color:var(--ink); font-family:var(--font);
+  font-size:13.5px; line-height:1.5; letter-spacing:-0.004em;
+  -webkit-font-smoothing:antialiased; height:100vh; overflow:hidden;
+}
+.mono{font-family:var(--mono);letter-spacing:0;font-feature-settings:"ss01","zero"}
+.ink2{color:var(--ink-2)} .ink3{color:var(--ink-3)}
+
+/* pills */
+.pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:500;
+  padding:6px 13px;border-radius:999px;white-space:nowrap;background:var(--card);color:var(--ink-2);border:1px solid transparent}
+.pill.lime{background:var(--lime);color:var(--lime-ink);font-weight:600}
+.pill.ghost{background:var(--card);color:var(--ink-2)} .pill.ghost:hover{color:var(--ink)}
+.pill.dotwrap{gap:8px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot.lime{background:var(--lime);box-shadow:0 0 8px var(--lime-bg)} .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.alert{background:var(--alert)} .dot.mut{background:var(--ink-3)}
+.kbd{font-family:var(--mono);font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+
+/* cards */
+.card{background:var(--card);border:1px solid var(--line-soft);border-radius:var(--r-card);padding:16px}
+.card.olive{background:var(--card-olive);border-color:oklch(0.5 0.08 122 / 0.25)}
+.card.tap{cursor:pointer;transition:border-color .2s var(--ease),transform .2s var(--ease)}
+.card.tap:hover{border-color:var(--line);transform:translateY(-1px)}
+
+/* metric card (biometric style): tick · label · light number · unit · arrow · mini chart · delta */
+.metric .top{display:flex;align-items:flex-start;gap:8px}
+.metric .tick{width:3px;height:13px;border-radius:2px;margin-top:3px;flex:none}
+.metric .lbl{color:var(--ink-2);font-size:12.5px;font-weight:500}
+.metric .num{font-weight:300;font-size:35px;line-height:1.02;letter-spacing:-0.025em;color:var(--ink);margin-top:7px}
+.metric .num small{font-size:14px;color:var(--ink-3);font-weight:400;margin-left:3px}
+.metric .arrow{margin-left:auto;color:var(--ink-3);font-size:15px}
+.metric .delta{display:inline-block;margin-top:10px;font-size:11px;padding:3px 10px;border-radius:999px;background:var(--lime-bg);color:var(--lime)}
+.metric .delta.down{background:var(--alert-bg);color:var(--alert)}
+.metric .cap{color:var(--ink-3);font-size:11px;margin-top:9px;line-height:1.4}
+/* mini scatter — tinted rounded box, baseline up top, dots below, one highlight */
+.metric svg.chart{display:block;margin-top:11px;border-radius:11px;background:oklch(0.45 0.07 124 / 0.13)}
+.metric svg.chart.bad{background:var(--alert-bg)}
+.metric svg.chart.warn{background:oklch(0.5 0.1 92 / 0.13)}
+.metric svg.chart.flat{background:oklch(0.3 0.004 140 / 0.5)}
+
+/* category tabs */
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tab{font-size:12.5px;padding:9px 15px;border-radius:14px;background:var(--card);color:var(--ink-2);cursor:pointer;border:1px solid var(--line-soft)}
+.tab:hover{color:var(--ink)} .tab.on{background:var(--lime);color:var(--lime-ink);font-weight:600;border-color:transparent}
+.tab.add{color:var(--ink-3);padding:9px 13px}
+
+/* glassy floating callout over the plexus */
+.callout{position:absolute;background:oklch(0.21 0.004 140 / 0.5);backdrop-filter:blur(20px) saturate(1.2);-webkit-backdrop-filter:blur(20px) saturate(1.2);
+  border:1px solid oklch(1 0 0 / 0.09);border-radius:18px;padding:15px 17px;min-width:214px;box-shadow:var(--shadow)}
+.callout .ch{display:flex;align-items:center;gap:10px;font-size:14.5px;color:var(--ink);font-weight:500;letter-spacing:-0.01em}
+.callout .risk{margin-left:auto;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--alert-bg);color:var(--alert)}
+.callout .risk.ok{background:var(--lime-bg);color:var(--lime)} .callout .risk.warn{background:oklch(0.5 0.1 92 / 0.16);color:var(--warn)}
+.callout .row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-3);margin-top:9px}
+.callout .row b{color:var(--ink-2);font-weight:500}
+.callout .x{position:absolute;top:13px;right:14px;color:var(--ink-3);font-size:12px;cursor:pointer}
+
+/* timeline scrubber */
+.scrub{display:flex;align-items:center;gap:14px;background:oklch(0.16 0.004 140 / 0.7);backdrop-filter:blur(10px);
+  border:1px solid var(--line-soft);border-radius:999px;padding:8px 14px}
+.scrub .seg{display:flex;align-items:center;gap:8px;color:var(--ink-3);font-size:11.5px}
+.scrub .seg b{color:var(--ink-2);font-weight:500}
+.scrub .ticks{display:flex;gap:5px;align-items:center}
+.scrub .ticks i{width:4px;height:4px;border-radius:50%;background:var(--ink-3);opacity:.5}
+.scrub .ticks i.on{background:var(--lime);opacity:1;box-shadow:0 0 7px var(--lime-bg)}
+
+.orb-wrap{position:relative}
+.orb-wrap canvas{display:block;width:100%;height:100%}
+@media (prefers-reduced-motion: reduce){ .orb-wrap canvas{opacity:.92} }

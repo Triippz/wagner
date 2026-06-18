@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wagner — Coding workspace (mock)</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .shell{display:grid;grid-template-rows:58px 48px 1fr;height:100vh}
+  /* top bar (same language as Home) */
+  .top{display:flex;align-items:center;gap:12px;padding:0 18px}
+  .hex{width:30px;height:30px;border-radius:9px;background:var(--card);display:grid;place-items:center;color:var(--lime);font-size:15px}
+  .top .tabs{margin:0 auto;display:flex;align-items:center;gap:8px}
+  .top .tabs .ic{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-3)}
+  .top .right{display:flex;align-items:center;gap:8px}
+  .iconbtn{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-2);cursor:pointer;position:relative}
+  .iconbtn .badge{position:absolute;top:-4px;right:-4px;background:var(--alert);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:grid;place-items:center;padding:0 3px}
+  /* workspace sub-header: breadcrumb + session status + abort */
+  .sub{display:flex;align-items:center;gap:12px;padding:0 18px}
+  .crumb{display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:13px}
+  .crumb b{color:var(--ink);font-weight:500} .crumb span{color:var(--ink-3)}
+  .sub .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .stat-mono{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)} .stat-mono b{color:var(--ink-2);font-weight:500}
+  .abort{font:inherit;font-size:12.5px;font-weight:500;border-radius:999px;padding:7px 16px;border:1px solid oklch(0.5 0.13 25 / .45);background:transparent;color:var(--alert);cursor:pointer}
+  .abort:hover{background:var(--alert-bg)}
+  /* body */
+  .body{display:grid;grid-template-columns:266px 1fr 344px;min-height:0;gap:14px;padding:14px 14px 0}
+  .panel{min-height:0;display:flex;flex-direction:column;gap:13px;overflow:auto;padding-bottom:14px}
+  .ph{font-size:11.5px;font-weight:600;color:var(--ink-2);display:flex;justify-content:space-between;align-items:center}
+  .ph .n{color:var(--ink-3);font-weight:400}
+  /* files */
+  .files .dir{color:var(--ink-3);font-size:11px;padding:9px 4px 3px}
+  .f{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:9px;color:var(--ink-2);font-size:12.5px;cursor:pointer}
+  .f:hover{background:var(--card-2)} .f.on{background:var(--card-2);color:var(--ink)}
+  .f .tick{width:3px;height:12px;border-radius:2px;background:transparent} .f.on .tick{background:var(--lime)}
+  .f .ch{margin-left:auto;font-family:var(--mono);font-size:10.5px} .f .add{color:var(--ok)} .f .del{color:var(--alert)}
+  /* work card: diff */
+  .work{min-height:0;display:flex;flex-direction:column;padding:0;overflow:hidden}
+  .filebar{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line-soft)}
+  .filebar .path{font-family:var(--mono);font-size:12.5px;color:var(--ink)} .filebar .meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+  .diff{overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:10px 0}
+  .ln{display:flex;white-space:pre} .ln .no{width:48px;text-align:right;padding-right:14px;color:var(--ink-3);user-select:none;flex:none}
+  .ln .tx{flex:1;padding-right:18px}
+  .ln.add{background:oklch(0.5 0.12 150 / .11)} .ln.add .tx::before{content:"+ ";color:var(--ok)}
+  .ln.del{background:var(--alert-bg)} .ln.del .tx::before{content:"− ";color:var(--alert)}
+  .ln .tx::before{color:var(--ink-3);content:"  "}
+  .hunk{color:var(--lime-deep);padding:6px 0 6px 62px;font-size:11.5px}
+  .cmt{color:var(--ink-3)} .kw{color:oklch(0.78 0.1 285)} .str{color:var(--ok)} .fn{color:var(--lime)}
+  /* run panel */
+  .agent{display:flex;align-items:center;gap:11px;padding:11px 13px}
+  .agent .av{width:28px;height:28px;border-radius:9px;background:var(--card-2);display:grid;place-items:center;font-size:11px;color:var(--ink-2);font-weight:600}
+  .agent .n{font-weight:500;color:var(--ink);font-size:13px} .agent .r{color:var(--ink-3);font-size:11px}
+  .log .e{padding:10px 0;border-top:1px solid var(--line-soft);font-size:12px;line-height:1.5} .log .e:first-of-type{border-top:0}
+  .log .meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3)} .log .role{color:var(--warn)} .log .role.review{color:var(--lime)} .log .role.shell{color:oklch(0.78 0.1 285)}
+  .log .e p{color:var(--ink-2);margin-top:3px} .log code{font-family:var(--mono);background:var(--card-2);padding:1px 5px;border-radius:5px;color:var(--ink)}
+  /* docked companion */
+  .dock{position:fixed;right:18px;bottom:18px;z-index:var(--z-dock);display:flex;align-items:flex-end;gap:12px}
+  .dock .bubble{max-width:300px;background:oklch(0.21 0.004 140 / 0.55);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    border:1px solid oklch(1 0 0 / .08);border-radius:16px 16px 4px 16px;padding:11px 14px;color:var(--ink);font-size:12.5px;line-height:1.45;box-shadow:var(--shadow)}
+  .dock .bubble .who{font-size:10.5px;color:var(--ink-3);margin-bottom:3px;display:flex;align-items:center;gap:6px}
+  .dock .companion{position:relative;width:78px;height:78px;flex:none}
+  .dock .companion canvas{width:100%;height:100%}
+  .dock .companion .hint{position:absolute;bottom:-17px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9.5px;color:var(--ink-3);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <a class="hex" href="dashboard.html">⬡</a>
+    <span class="pill ghost">Today ▾</span>
+    <nav class="tabs">
+      <span class="ic">⌕</span>
+      <a class="pill ghost" href="dashboard.html">Command Deck</a>
+      <a class="pill lime" href="coding.html">Coding</a>
+      <a class="pill ghost" href="agents.html">Agents</a>
+      <a class="pill ghost" href="workflows.html">Workflows</a>
+      <a class="pill ghost" href="knowledge.html">Knowledge</a>
+    </nav>
+    <div class="right">
+      <a class="iconbtn" href="settings.html">⚙</a><span class="iconbtn">▤</span><span class="iconbtn">⌃<span class="badge">2</span></span>
+    </div>
+  </header>
+
+  <div class="sub">
+    <div class="crumb">wagner <span>/</span> <b>abort-cancel fix</b></div>
+    <div class="right">
+      <span class="pill" style="background:var(--lime-bg);color:var(--lime)"><span class="dot lime"></span>running · planning</span>
+      <span class="stat-mono">it <b>1</b> · $<b>0.72</b> · <b>opus</b> + <b>codex</b></span>
+      <button class="abort">Abort</button>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- files -->
+    <aside class="panel files">
+      <div class="ph">Files <span class="n">wagner</span></div>
+      <div class="card" style="padding:8px">
+        <div class="dir">edge / shell / src</div>
+        <div class="f on"><span class="tick"></span>commands.rs<span class="ch add">+14</span></div>
+        <div class="f"><span class="tick"></span>voice_lifecycle.rs</div>
+        <div class="dir">edge / host / src</div>
+        <div class="f"><span class="tick"></span>state/run.rs</div>
+        <div class="f"><span class="tick"></span>orchestrator/run_loop.rs</div>
+      </div>
+      <div class="ph">Changed <span class="n">3</span></div>
+      <div class="card" style="padding:8px">
+        <div class="f"><span class="tick"></span>commands.rs<span class="ch"><span class="add">+14</span> <span class="del">−2</span></span></div>
+        <div class="f"><span class="tick"></span>run-state.json<span class="ch add">+1</span></div>
+        <div class="f"><span class="tick"></span>commands test<span class="ch add">+11</span></div>
+      </div>
+    </aside>
+
+    <!-- the work: live diff (the real abort fix) -->
+    <main class="panel" style="overflow:hidden">
+      <div class="card work">
+        <div class="filebar"><span class="path">edge/shell/src/commands.rs</span><span class="meta">+14 −2 · unstaged</span></div>
+        <div class="diff">
+          <div class="hunk">@@ fn abort — announce the stop so the UI leaves "running" @@</div>
+          <div class="ln"><span class="no">855</span><span class="tx">    <span class="kw">for</span> id <span class="kw">in</span> abort_targets(&live, run_id.as_deref()) {</span></div>
+          <div class="ln"><span class="no">856</span><span class="tx">        <span class="kw">if let</span> Some(ctl) = guard.remove(&id) {</span></div>
+          <div class="ln"><span class="no">857</span><span class="tx">            ctl.task.<span class="fn">abort</span>();</span></div>
+          <div class="ln"><span class="no">858</span><span class="tx">            ctl.gate_server.<span class="fn">abort</span>();</span></div>
+          <div class="ln"><span class="no">859</span><span class="tx">        }</span></div>
+          <div class="ln add"><span class="no">860</span><span class="tx"><span class="cmt">// killed task never emits its terminal run — do it here</span></span></div>
+          <div class="ln add"><span class="no">861</span><span class="tx"><span class="kw">if let</span> Ok(run) = state::<span class="fn">load</span>(&runs_root, &id) {</span></div>
+          <div class="ln add"><span class="no">862</span><span class="tx">    <span class="kw">let</span> run = <span class="fn">aborted</span>(run);</span></div>
+          <div class="ln add"><span class="no">863</span><span class="tx">    <span class="kw">let</span> _ = state::<span class="fn">save</span>(&runs_root, &run);</span></div>
+          <div class="ln add"><span class="no">864</span><span class="tx">    <span class="kw">let</span> _ = app.<span class="fn">emit</span>(<span class="str">"wagner://run"</span>, run);</span></div>
+          <div class="ln add"><span class="no">865</span><span class="tx">}</span></div>
+          <div class="ln"><span class="no">866</span><span class="tx">    }</span></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- run panel -->
+    <aside class="panel">
+      <div class="ph">Agents <span class="n">3</span></div>
+      <div class="card" style="padding:5px">
+        <div class="agent"><span class="av">PL</span><div style="flex:1"><div class="n">Planner</div><div class="r">scoped the fix</div></div><span class="pill" style="background:var(--lime-bg);color:var(--lime);font-size:10.5px"><span class="dot lime"></span>done</span></div>
+        <div class="agent" style="border-top:1px solid var(--line-soft)"><span class="av">BD</span><div style="flex:1"><div class="n">Builder</div><div class="r">editing commands.rs</div></div><span class="pill" style="background:var(--lime-bg);color:var(--lime);font-size:10.5px"><span class="dot lime"></span>running</span></div>
+        <div class="agent" style="border-top:1px solid var(--line-soft)"><span class="av">RV</span><div style="flex:1"><div class="n">Reviewer</div><div class="r">waiting for build</div></div><span class="pill" style="font-size:10.5px"><span class="dot mut"></span>idle</span></div>
+      </div>
+      <div class="ph">Activity</div>
+      <div class="card log">
+        <div class="e"><span class="meta">22:41 · <span class="role">edit</span></span><p>Added abort→emit in <code>commands.rs</code> — loads the run, marks it aborted, emits <code>wagner://run</code>.</p></div>
+        <div class="e"><span class="meta">22:41 · <span class="role shell">shell</span></span><p><code>cargo test aborted_marks_run_terminal</code> → ok</p></div>
+        <div class="e"><span class="meta">22:40 · <span class="role think">think</span></span><p>Root cause: the killed loop task never reaches its terminal emit, so the UI stays "running".</p></div>
+        <div class="e"><span class="meta">22:40 · <span class="role review">review</span></span><p>Confirmed in <code>run_loop.rs:204</code> — the final emit is past the await that abort cancels.</p></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- the assistant, docked -->
+<div class="dock">
+  <div class="bubble"><div class="who"><span class="dot lime"></span>Wagner</div><span id="dsay">Builder is editing commands.rs. Test passed. I'll tell you when the build is green.</span></div>
+  <div class="companion"><canvas id="dorb"></canvas><span class="hint">hold ⌥Space</span></div>
+</div>
+
+<script type="module">
+  import { mountGraph } from './graph.js';
+  const g = mountGraph(document.getElementById('dorb'), { count: 80, fill: 0.42, links: 3 });
+  g.set({ speaking: true });
+  const lines = [
+    "Builder is editing commands.rs. Test passed. I'll tell you when the build is green.",
+    "Reviewer is queued. No action needed yet.",
+    "Build green. 14 lines added, 2 removed. Run the full suite?",
+  ];
+  const el = document.getElementById('dsay'); let i = 0;
+  setInterval(() => { i = (i+1)%lines.length; el.textContent = lines[i]; }, 3800);
+</script>
+</body>
+</html>

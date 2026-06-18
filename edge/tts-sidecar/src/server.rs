@@ -106,6 +106,15 @@ pub fn run(state: AppState, listen_addr: &str) -> ! {
         let method = request.method().clone();
         let url = request.url().to_owned();
 
+        // Liveness probe (B1): the shell's sidecar health-wait — and
+        // voice-sidecars.sh — need a 200 to know the engine is up. Without this
+        // route /health returned 404, so the Tauri voice-enable health-wait never
+        // succeeded and voice always surfaced a generic error.
+        if method == Method::Get && url == "/health" {
+            let _ = request.respond(Response::from_string("ok"));
+            continue;
+        }
+
         if method != Method::Post || url != "/v1/audio/speech" {
             let _ = request.respond(Response::from_string("not found").with_status_code(404));
             continue;
