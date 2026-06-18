@@ -849,17 +849,44 @@ pub fn answer_transmission(
     }
 }
 
+/// Flip a run to its terminal `Aborted` state. The killed loop task never reaches
+/// its own terminal emit, so without this the console + rail would stay "running"
+/// forever after Abort (B3 — operator saw "nothing happens").
+fn aborted(mut run: Run) -> Run {
+    run.status = wagner_edge_host::state::RunStatus::Aborted;
+    run.phase = wagner_edge_host::state::RunPhase::Halted;
+    run
+}
+
 /// Abort a run (FR-017): terminate its loop task; CLI children are killed on
 /// drop (`kill_on_drop`). `run_id = Some(id)` aborts that session only (others
 /// keep running); `None` aborts every live run (the single-session UI default).
+/// After killing the task we persist + emit the `Aborted` run so the UI leaves
+/// the running state (the loop task's own terminal emit never fires once aborted).
 #[tauri::command]
-pub fn abort(mgr: State<'_, RunManager>, run_id: Option<String>) -> Result<(), String> {
+pub fn abort(
+    app: AppHandle,
+    mgr: State<'_, RunManager>,
+    run_id: Option<String>,
+) -> Result<(), String> {
+    let runs_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runs");
     let mut guard = mgr.runs.lock().unwrap();
     let live: Vec<String> = guard.keys().cloned().collect();
     for id in abort_targets(&live, run_id.as_deref()) {
         if let Some(ctl) = guard.remove(&id) {
             ctl.task.abort();
             ctl.gate_server.abort();
+        }
+        // Announce the stop: load the persisted run, mark it aborted, persist,
+        // and emit `wagner://run` so the reducer transitions out of "running".
+        if let Ok(run) = wagner_edge_host::state::load(&runs_root, &id) {
+            let run = aborted(run);
+            let _ = wagner_edge_host::state::save(&runs_root, &run);
+            let _ = app.emit("wagner://run", run);
         }
     }
     Ok(())
@@ -1223,6 +1250,17 @@ mod tests {
         assert_eq!(abort_targets(&live, Some("zzz")), Vec::<String>::new());
         // None → every live run (single-session UI default).
         assert_eq!(abort_targets(&live, None), live);
+    }
+
+    #[test]
+    fn aborted_marks_run_terminal() {
+        use wagner_edge_host::state::{Run, RunPhase, RunStatus};
+        let mut run = Run::new("r1".into(), "goal".into(), vec![], "2026-06-17T00:00:00Z".into());
+        run.status = RunStatus::Running;
+        run.phase = RunPhase::Dispatching;
+        let out = super::aborted(run);
+        assert_eq!(out.status, RunStatus::Aborted);
+        assert_eq!(out.phase, RunPhase::Halted);
     }
 
     #[test]
