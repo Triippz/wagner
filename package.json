@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Wagner platform wedge — shared spine (schemas + reducer), edge UI, hub. Self-contained under platform/ (Article VII: nothing outside platform/ imports it).",
+  "description": "Wagner personal OS — local-first agents, workflows, vault knowledge graph, edge UI, and hub sync.",
   "workspaces": [
     "shared",
     "edge/ui",

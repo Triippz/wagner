@@ -4,30 +4,45 @@
 
 product
 
+## Source Of Truth
+
+`VISION.md` is the canonical product vision. This file is the shorter product
+register used when designing UI, copy, and interaction behavior.
+
 ## Users
 
-Mark — a software engineer/founder (Adyton) who does heavy software design and
-development but wants **one place to run his entire productivity stack**: coding,
-workflows/automations, knowledge, and connected tools (Slack, Discord, Jira,
-Notion, email, GitLab). A **verbal, voice-first** thinker who describes things
-better out loud than in writing. **ADHD** — needs explicit, well-defined,
-low-metaphor communication: clear status, defined answers, predictable structure,
-low cognitive load. Often works at night, focused, wants an ambient assistant he
-talks to. Solo operator today; **self-hostable + multi-tenant later** (invite his
-own people, username/password, not just SSO).
+Mark — a software engineer/founder (Adyton) who wants **one place to run daily
+work**: coding and development, agentic and deterministic workflows, knowledge,
+search, research, image/artifact generation, and connected tools (Slack, Discord,
+Jira, Notion, email, GitLab, calendars, docs, browsers). A **verbal,
+voice-first** thinker who describes things better out loud than in writing.
+**ADHD** — needs explicit, well-defined, low-metaphor communication: clear
+status, defined answers, predictable structure, low cognitive load. Often works
+at night, focused, wants an ambient assistant he talks to. Solo operator today;
+**self-hostable + multi-tenant later** so the same vault/workflow/agent system
+can sync across his own devices or be shared with a team.
 
 ## Product Purpose
 
-Wagner is a **personal command center / agentic OS** — a single operating picture
-over everything going on: agents, runs, workflows, knowledge, and connectors.
-Work is **not a fixed taxonomy of types** (generative AI is open-ended); the
-boundary that matters is *environment* — most work is light, but some is heavy and
-earns a dedicated **workspace**. **Coding is the one canonical heavy workspace**
-today (files, diffs, runs, the oracle/operative engine). It is **voice-first**:
-you talk to Wagner (a customizable assistant), it captures intent and dispatches
-agents/workflows, then reports back. Success = Mark runs his daily operations —
-code, automations, knowledge retrieval, comms — *through Wagner*, by voice and by
-click, instead of juggling a dozen separate tools.
+Wagner is a **local-first, cloud-connected personal OS** — a single operating
+picture over agents, workflows, knowledge, search, connectors, and dedicated
+workspaces. It should feel like a Maven-style smart system for one person's work:
+typed entities, source-aware analysis, clear status, and coordinated action. It
+is not an OSINT product; the reference is the seriousness and integrated
+operating picture, not the domain.
+
+Work is **not a fixed taxonomy of types** (generative AI is open-ended). The
+boundary that matters is *environment*: most work is light and can happen from
+the dashboard/assistant; heavy work earns a dedicated **workspace**. **Coding is
+the first heavy workspace**, not the product boundary. Wagner should also handle
+research, news briefings, general search, image generation, documents, workflow
+automation, and productivity connectors.
+
+It is **voice-first and text-equal**: you talk or type to Wagner, it captures
+intent, dispatches agents or deterministic workflows, uses tools like Codex and
+Claude Code where they are valuable, then reports back in UI, speech, or both.
+Success = Mark runs daily operations through Wagner instead of juggling a dozen
+separate tools.
 
 ## Brand Personality
 
@@ -57,6 +72,8 @@ click, instead of juggling a dozen separate tools.
   *do work in*, not just look at and talk to.
 - **An IDE clone (Cursor) that's only about code** — coding is one room, not the
   whole house.
+- **An OSINT / military-intelligence console** — the smart-system reference is
+  operating-picture quality and entity-aware reasoning, not the domain.
 
 ## Design Principles
 
@@ -69,10 +86,13 @@ click, instead of juggling a dozen separate tools.
    blocking the work.
 4. **Voice-first, click-equal.** Anything you can do by speaking you can do by
    clicking, and vice-versa.
-5. **Explicit over clever.** Engineer-grade communication: defined answers,
+5. **Local-first, cloud-connected.** Local execution and local knowledge are the
+   default; cloud sync/share extends the vault and coordination model without
+   becoming the required path for local work.
+6. **Explicit over clever.** Engineer-grade communication: defined answers,
    structured status, no metaphor-soup — built for an operator who wants clarity,
    not vibes.
-6. **Bespoke craft.** Deliberate type and color that read as hand-made and
+7. **Bespoke craft.** Deliberate type and color that read as hand-made and
    professional — proof a person designed this, not a generator.
 
 ## Accessibility & Inclusion

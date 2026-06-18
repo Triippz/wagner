@@ -7,8 +7,10 @@
 
 ## 1. One product, two layers
 
-Wagner runs autonomous coding agents and accumulates what they learn into a
-shared, living knowledge base. **Edge executes, hub remembers.**
+Wagner is a local-first personal OS for daily work: agents, deterministic
+workflows, voice/text interaction, search/research, productivity connectors,
+dedicated workspaces, and a shared vault knowledge graph. Coding is the first
+heavy workspace, not the product boundary. **Edge executes, hub remembers.**
 
 ```mermaid
 flowchart LR
@@ -25,10 +27,12 @@ flowchart LR
     EDGE <-->|"iroh gossip/docs"| EDGE2["Other operators' edges"]
 ```
 
-- **Edge** is the product surface: a single signed `.app` that runs agents,
-  shows the console/graph, holds the local vault, and (now) runs voice natively.
+- **Edge** is the product surface: a single signed `.app` that runs agents and
+  workflows, shows the operating picture/graph/workspaces, holds the local
+  vault, and runs voice natively.
 - **Hub** is a headless always-on peer that persists the shared vault and brokers
-  multi-teammate sync + presence. It never executes agents.
+  multi-device or multi-teammate sync + presence. It does not sit on the local
+  execution path.
 - The link between them is **iroh** (QUIC P2P) — not HTTP request/response. The
   vault is a CRDT (loro); sync is gossip + a snapshot store.
 
@@ -89,6 +93,13 @@ flowchart LR
   `make accept`'s headless UI journey — acceptance tests with no native shell.
 
 ## 4. The five pillars
+
+> **Target runtime ([`runtime-architecture.md`](runtime-architecture.md)):** each
+> pillar below becomes a **participant** on one typed event bus — and so do agents,
+> connectors, and the scheduler. The goal loop is one participant, not the hub.
+> The pillars are how the engine is *organized today*; the bus is how the parts
+> *communicate* once `specs/011-runtime-foundation` lands. Durable state
+> (CRDT + JSON) is unchanged by the move; only the in-process wiring becomes pub/sub.
 
 ```mermaid
 flowchart TD
