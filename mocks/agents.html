@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wagner — Agents (mock)</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .shell{display:grid;grid-template-rows:58px 1fr;height:100vh}
+  .top{display:flex;align-items:center;gap:12px;padding:0 18px}
+  .hex{width:30px;height:30px;border-radius:9px;background:var(--card);display:grid;place-items:center;color:var(--lime);font-size:15px}
+  .top .tabs{margin:0 auto;display:flex;align-items:center;gap:8px}
+  .top .tabs .ic{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-3)}
+  .top .right{display:flex;align-items:center;gap:8px}
+  .iconbtn{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-2);cursor:pointer;position:relative}
+  .iconbtn .badge{position:absolute;top:-4px;right:-4px;background:var(--alert);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:grid;place-items:center;padding:0 3px}
+  /* body: list | editor */
+  .body{display:grid;grid-template-columns:288px 1fr;min-height:0}
+  .list{border-right:1px solid var(--line-soft);overflow:auto;padding:16px 14px;display:flex;flex-direction:column;gap:9px}
+  .newbtn{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:14px;border:1px dashed var(--line);color:var(--lime);font-weight:500;cursor:pointer;background:transparent}
+  .newbtn:hover{background:var(--lime-bg);border-color:transparent}
+  .lh{font-size:11px;font-weight:600;color:var(--ink-3);padding:6px 4px 2px}
+  .arow{display:flex;align-items:center;gap:11px;padding:11px;border-radius:13px;cursor:pointer;border:1px solid transparent}
+  .arow:hover{background:var(--card)} .arow.on{background:var(--card);border-color:var(--line)}
+  .av{width:32px;height:32px;border-radius:10px;background:var(--card-2);display:grid;place-items:center;font-size:12px;color:var(--ink-2);font-weight:600;flex:none}
+  .arow.on .av{background:var(--lime);color:var(--lime-ink)}
+  .arow .n{font-weight:500;color:var(--ink);font-size:13.5px} .arow .m{color:var(--ink-3);font-size:11px;margin-top:1px}
+  .arow .st{margin-left:auto}
+  /* editor */
+  .editor{overflow:auto;padding:20px 24px}
+  .ehead{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+  .ehead .big{width:46px;height:46px;border-radius:13px;background:var(--lime);color:var(--lime-ink);display:grid;place-items:center;font-size:17px;font-weight:700}
+  .ehead h1{font-size:21px;font-weight:600;letter-spacing:-0.02em} .ehead .sub{color:var(--ink-3);font-size:12.5px;margin-top:1px}
+  .ehead .acts{margin-left:auto;display:flex;gap:8px}
+  .btn{font:inherit;font-size:12.5px;font-weight:500;border-radius:999px;padding:8px 16px;border:1px solid var(--line);background:var(--card);color:var(--ink-2);cursor:pointer}
+  .btn.primary{background:var(--lime);color:var(--lime-ink);border-color:transparent;font-weight:600}
+  .egrid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+  .fl{font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .fl .hint{font-weight:400;color:var(--ink-3);font-size:11px}
+  .prompt{font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--ink-2);background:var(--bg-deep);border:1px solid var(--line-soft);border-radius:12px;padding:14px;min-height:188px;white-space:pre-wrap}
+  .opts{display:flex;flex-wrap:wrap;gap:8px}
+  .opt{font-size:12px;padding:8px 13px;border-radius:11px;background:var(--card-2);color:var(--ink-2);cursor:pointer;border:1px solid transparent}
+  .opt:hover{color:var(--ink)} .opt.on{background:var(--lime);color:var(--lime-ink);font-weight:600}
+  .opt .mut{opacity:.6;font-size:10.5px;margin-left:5px}
+  .switch{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line-soft)}
+  .switch:first-of-type{border-top:0}
+  .switch .lab{color:var(--ink-2);font-size:13px} .switch .lab small{display:block;color:var(--ink-3);font-size:11px;margin-top:1px}
+  .tg{width:38px;height:22px;border-radius:999px;background:var(--card-2);position:relative;flex:none;cursor:pointer}
+  .tg::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--ink-3);transition:.18s var(--ease)}
+  .tg.on{background:var(--lime)} .tg.on::after{left:19px;background:var(--lime-ink)}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{font-family:var(--mono);font-size:11.5px;padding:6px 11px;border-radius:9px;background:var(--card-2);color:var(--ink-2);display:flex;align-items:center;gap:7px}
+  .chip.on{background:var(--lime-bg);color:var(--lime)} .chip .x{opacity:.6}
+  .chip.act{cursor:pointer;color:var(--ink-3);border:1px dashed var(--line);background:transparent}
+  .note{color:var(--ink-3);font-size:11.5px;margin-top:11px;line-height:1.45}
+  .radio{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft);color:var(--ink-2);font-size:13px;cursor:pointer}
+  .radio:first-of-type{border-top:0}
+  .rb{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);flex:none;position:relative}
+  .radio.on .rb{border-color:var(--lime)} .radio.on .rb::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--lime)}
+  .dock{position:fixed;right:18px;bottom:18px;z-index:var(--z-dock);display:flex;align-items:flex-end;gap:12px}
+  .dock .bubble{max-width:312px;background:oklch(0.21 0.004 140 / 0.55);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid oklch(1 0 0 / .08);border-radius:16px 16px 4px 16px;padding:11px 14px;color:var(--ink);font-size:12.5px;line-height:1.45;box-shadow:var(--shadow)}
+  .dock .bubble .who{font-size:10.5px;color:var(--ink-3);margin-bottom:3px;display:flex;align-items:center;gap:6px}
+  .dock .companion{position:relative;width:78px;height:78px;flex:none} .dock .companion canvas{width:100%;height:100%}
+  .dock .companion .hint{position:absolute;bottom:-17px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9.5px;color:var(--ink-3);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <a class="hex" href="dashboard.html">⬡</a>
+    <span class="pill ghost">Today ▾</span>
+    <nav class="tabs">
+      <span class="ic">⌕</span>
+      <a class="pill ghost" href="dashboard.html">Command Deck</a>
+      <a class="pill ghost" href="coding.html">Coding</a>
+      <a class="pill lime" href="agents.html">Agents</a>
+      <a class="pill ghost" href="workflows.html">Workflows</a>
+      <a class="pill ghost" href="knowledge.html">Knowledge</a>
+    </nav>
+    <div class="right"><a class="iconbtn" href="settings.html">⚙</a><span class="iconbtn">▤</span><span class="iconbtn">⌃<span class="badge">2</span></span></div>
+  </header>
+
+  <div class="body">
+    <!-- agent list -->
+    <aside class="list">
+      <div class="newbtn">＋ New agent</div>
+      <div class="lh">YOUR AGENTS</div>
+      <div class="arow"><span class="av">PL</span><div><div class="n">Planner</div><div class="m">Opus · scopes & plans</div></div><span class="dot lime st"></span></div>
+      <div class="arow on"><span class="av">BD</span><div><div class="n">Builder</div><div class="m">Sonnet · implements</div></div><span class="dot lime st"></span></div>
+      <div class="arow"><span class="av">RV</span><div><div class="n">Reviewer</div><div class="m">Opus · checks work</div></div><span class="dot lime st"></span></div>
+      <div class="arow"><span class="av">SC</span><div><div class="n">Scout</div><div class="m">GPT-5 · reads Slack</div></div><span class="dot mut st"></span></div>
+      <div class="arow"><span class="av">RS</span><div><div class="n">Researcher</div><div class="m">Opus · deep research</div></div><span class="dot mut st"></span></div>
+      <div class="arow"><span class="av">SB</span><div><div class="n">Scribe</div><div class="m">Haiku · writes the vault</div></div><span class="dot mut st"></span></div>
+    </aside>
+
+    <!-- editor -->
+    <main class="editor">
+      <div class="ehead">
+        <div class="big">BD</div>
+        <div><h1>Builder</h1><div class="sub">Implements scoped tasks · used in Coding runs</div></div>
+        <div class="acts"><button class="btn">Run</button><button class="btn primary">Save</button></div>
+      </div>
+
+      <div class="egrid">
+        <!-- left: prompt + skills -->
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="fl">System prompt <span class="hint">defines how this agent behaves</span></div>
+            <div class="prompt">You are Builder. Implement the assigned subtask against its acceptance criteria.
+
+Write the test first, then the code. Keep diffs minimal and match the surrounding style. Never touch files outside `may_write_paths`. When the build is green, stop and report what changed in one line.
+
+Do not invent scope. If the task is ambiguous, ask one specific question.</div>
+          </div>
+          <div class="card">
+            <div class="fl">Skills <span class="hint">discovered + installed</span></div>
+            <div class="chips">
+              <span class="chip on">/tdd <span class="x">✕</span></span>
+              <span class="chip on">/check-rust <span class="x">✕</span></span>
+              <span class="chip on">/verification <span class="x">✕</span></span>
+              <span class="chip">/code-review</span>
+              <span class="chip act">＋ Discover in project</span>
+              <span class="chip act">↧ Install from GitHub</span>
+            </div>
+            <div class="note">Found in <span class="mono">.claude/</span>, cursor rules, and <span class="mono">.agents/</span>. Installed skills work in any agent or harness.</div>
+          </div>
+        </div>
+
+        <!-- right: model + tools + harness -->
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="fl">Model</div>
+            <div class="opts">
+              <span class="opt">Claude Opus</span>
+              <span class="opt on">Claude Sonnet</span>
+              <span class="opt">Codex</span>
+              <span class="opt">Cursor</span>
+              <span class="opt">GLM-4.6</span>
+              <span class="opt">Self-hosted</span>
+            </div>
+            <div class="switch" style="margin-top:12px"><div class="lab">Auto-route by cost & difficulty<small>picks the cheapest model that clears the test gate</small></div><span class="tg on"></span></div>
+            <div class="note">Sonnet selected — cost-effective for implementation. Auto-route escalates to Opus on hard refactors.</div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="fl">Tools & access</div>
+            <div class="switch"><div class="lab">Read files</div><span class="tg on"></span></div>
+            <div class="switch"><div class="lab">Run shell</div><span class="tg on"></span></div>
+            <div class="switch"><div class="lab">Web</div><span class="tg"></span></div>
+            <div class="switch"><div class="lab">MCP · GitLab</div><span class="tg on"></span></div>
+            <div class="switch"><div class="lab">MCP · Slack</div><span class="tg"></span></div>
+            <div class="note">Allowed paths: <span class="mono">edge/ · mocks/</span></div>
+          </div>
+
+          <div class="card">
+            <div class="fl">Harness</div>
+            <div class="radio on"><span class="rb"></span>Claude Code CLI</div>
+            <div class="radio"><span class="rb"></span>Agent SDK · TypeScript</div>
+            <div class="radio"><span class="rb"></span>Agent SDK · Python</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="dock">
+  <div class="bubble"><div class="who"><span class="dot lime"></span>Wagner</div><span id="dsay">Builder uses Sonnet — the cheapest model that clears your test gate. I escalate to Opus only on hard refactors.</span></div>
+  <div class="companion"><canvas id="dorb"></canvas><span class="hint">hold ⌥Space</span></div>
+</div>
+
+<script type="module">
+  import { mountGraph } from './graph.js';
+  const g = mountGraph(document.getElementById('dorb'), { count: 80, fill: 0.42, links: 3 });
+  g.set({ speaking: true });
+</script>
+</body>
+</html>

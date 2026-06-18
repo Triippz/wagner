@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wagner — Command Deck (mock)</title>
+<link rel="stylesheet" href="_app.css">
+<style>
+  .shell{display:grid;grid-template-columns:300px 1fr 384px;grid-template-rows:60px 1fr;height:100vh}
+  /* top bar */
+  .top{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 18px}
+  .hex{width:30px;height:30px;border-radius:9px;background:var(--card);display:grid;place-items:center;color:var(--lime);font-size:15px}
+  .top .tabs{margin:0 auto;display:flex;align-items:center;gap:8px}
+  .top .tabs .ic{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-3);cursor:pointer}
+  .top .tab{padding:7px 14px}
+  .top .right{display:flex;align-items:center;gap:8px}
+  .iconbtn{width:34px;height:34px;border-radius:11px;background:var(--card);display:grid;place-items:center;color:var(--ink-2);cursor:pointer;position:relative}
+  .iconbtn:hover{color:var(--ink)} .iconbtn .badge{position:absolute;top:-4px;right:-4px;background:var(--alert);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:grid;place-items:center;padding:0 3px}
+  /* columns */
+  .col{padding:16px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+  .col.l{gap:13px}
+  .lead{display:flex;align-items:center;justify-content:space-between;color:var(--ink-2);font-size:12.5px}
+  .lead .chev{color:var(--ink-3)}
+  .op .row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line-soft)}
+  .op .row:first-of-type{border-top:0}
+  .op .row .k{color:var(--ink-2)} .op .row .v{font-weight:300;font-size:19px;color:var(--ink)}
+  .op .bigrow{display:flex;align-items:baseline;gap:10px;margin-top:4px}
+  .op .stat{display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:13px;margin-top:8px}
+  .op .bar{height:5px;border-radius:3px;background:var(--card-2);overflow:hidden;margin-top:11px}
+  .op .bar i{display:block;height:100%;background:var(--lime)}
+  .twin{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .wc{display:flex;flex-direction:column;gap:10px;min-height:128px}
+  .wc .t{display:flex;align-items:center;justify-content:space-between;color:var(--ink);font-weight:500} .wc .t .ar{color:var(--ink-3)}
+  .wc .sub{color:var(--ink-3);font-size:11.5px}
+  .wc .prev{margin-top:auto;height:48px;border-radius:10px;background:linear-gradient(120deg,var(--card-2),var(--card));display:flex;align-items:flex-end;padding:7px 9px;color:var(--ink-3);font-size:11px}
+  .idbar{margin-top:auto;display:flex;align-items:center;gap:10px}
+  .ubtn{width:38px;height:38px;border-radius:50%;background:var(--card);display:grid;place-items:center;color:var(--ink-2)}
+  /* center */
+  .center{position:relative;overflow:hidden}
+  .center .orb-wrap{position:absolute;inset:0}
+  .voice{position:absolute;left:50%;bottom:84px;transform:translateX(-50%);z-index:var(--z-orb);display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;width:min(560px,70%)}
+  .voice .who{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2)}
+  .voice .say{font-size:14.5px;color:var(--ink);text-shadow:0 2px 18px var(--bg),0 0 28px var(--bg);min-height:21px}
+  .voice .ask{display:flex;align-items:center;gap:9px;color:var(--ink-3);font-size:12px}
+  .scrubwrap{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:var(--z-orb)}
+  .nodelabel{position:absolute;z-index:var(--z-orb);display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);text-shadow:0 1px 10px var(--bg)}
+  /* right */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .span2{grid-column:1/-1}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- TOP -->
+  <header class="top">
+    <a class="hex" href="dashboard.html">⬡</a>
+    <span class="pill ghost">Today <span class="chev">▾</span></span>
+    <nav class="tabs">
+      <span class="ic">⌕</span>
+      <a class="pill lime" href="dashboard.html">Command Deck</a>
+      <a class="pill ghost" href="coding.html">Coding</a>
+      <a class="pill ghost" href="agents.html">Agents</a>
+      <a class="pill ghost" href="workflows.html">Workflows</a>
+      <a class="pill ghost" href="knowledge.html">Knowledge</a>
+    </nav>
+    <div class="right">
+      <a class="iconbtn" href="settings.html">⚙</a>
+      <span class="iconbtn">▤</span>
+      <span class="iconbtn">⌃<span class="badge">2</span></span>
+    </div>
+  </header>
+
+  <!-- LEFT -->
+  <div class="col l">
+    <span class="pill ghost" style="align-self:flex-start">Context: Today <span style="color:var(--ink-3);margin-left:4px">▾</span></span>
+
+    <div class="card olive op">
+      <div class="lead"><span style="color:var(--ink);font-weight:500">Operating picture</span><span class="chev">▴</span></div>
+      <div class="row"><span class="k">Active work</span><span class="v">3</span></div>
+      <div class="row"><span class="k">Needs you</span><span class="v" style="display:flex;align-items:center;gap:8px"><span class="dot warn"></span>1</span></div>
+      <div class="stat"><span class="dot lime"></span>Nominal · spend <b style="color:var(--ink);font-weight:500">$1.12</b> · window <b style="color:var(--ink);font-weight:500">9%</b></div>
+      <div class="bar"><i style="width:62%"></i></div>
+    </div>
+
+    <div class="twin">
+      <div class="card tap wc"><div class="t">Coding <span class="ar">↗</span></div><div class="sub">3 sessions</div><div class="prev">matrix demo · abort fix</div></div>
+      <div class="card tap wc"><div class="t">Workflows <span class="ar">↗</span></div><div class="sub">2 scheduled</div><div class="prev">Fri status → #eng</div></div>
+    </div>
+
+    <div class="card tap wc" style="min-height:96px"><div class="t">Recent learnings <span class="ar">↗</span></div><div class="sub" style="line-height:1.7;margin-top:4px">Abort must cancel the run · verified<br>Sam prefers async updates · inferred<br>Voice sidecar on PATH in dev</div></div>
+
+    <div class="idbar">
+      <span class="pill lime">Wagner <span style="margin-left:4px">▾</span></span>
+      <span class="ubtn">◔</span>
+    </div>
+  </div>
+
+  <!-- CENTER: knowledge plexus + callouts + voice + scrubber -->
+  <div class="center">
+    <div class="orb-wrap"><canvas id="plexus"></canvas></div>
+
+    <div class="nodelabel" style="top:20%;left:14%"><span class="dot mut"></span>Voice subsystem</div>
+    <div class="nodelabel" style="top:30%;right:16%;color:var(--lime)"><span class="dot lime"></span>Connectors</div>
+
+    <div class="callout" style="top:34%;left:25%">
+      <span class="x">✕</span>
+      <div class="ch">Abort fix <span class="risk ok">verified</span></div>
+      <div class="row"><span>Links</span><b>2 notes</b></div>
+      <div class="row"><span>Source</span><b>this session</b></div>
+      <div class="row"><span>Updated</span><b>22:41</b></div>
+    </div>
+    <div class="callout" style="top:59%;left:11%">
+      <span class="x">✕</span>
+      <div class="ch">Sam's prefs <span class="risk warn">inferred</span></div>
+      <div class="row"><span>From</span><b>Slack</b></div>
+      <div class="row"><span>Type</span><b>teammate note</b></div>
+    </div>
+    <div class="nodelabel" style="top:54%;right:22%;color:var(--alert)"><span class="dot alert"></span>Disputed: relay choice</div>
+
+    <div class="voice">
+      <div class="who"><span class="dot lime" id="vdot"></span><span id="vstate">Wagner — listening</span></div>
+      <div class="say" id="vsay"></div>
+      <div class="ask">Ask, or <span class="kbd">hold ⌥Space</span> to talk</div>
+    </div>
+
+    <div class="scrubwrap">
+      <div class="scrub">
+        <span class="seg"><b>Today</b></span>
+        <span class="ticks"><i></i><i></i><i class="on"></i><i></i><i></i></span>
+        <span class="seg">This week</span>
+        <span class="seg">All</span>
+        <span class="seg" style="margin-left:6px">＋ －</span>
+        <span class="pill ghost" style="font-size:11px;padding:4px 11px">graph</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: category tabs + metric cards -->
+  <div class="col r">
+    <div class="tabs">
+      <span class="tab add">＋</span>
+      <span class="tab on">Code</span>
+      <span class="tab">Comms</span>
+      <span class="tab">Workflows</span>
+      <span class="tab">People</span>
+    </div>
+
+    <div class="grid2">
+      <div class="card metric">
+        <div class="top"><span class="tick" style="background:var(--lime)"></span><span class="lbl">Active runs</span><span class="arrow">→</span></div>
+        <div class="num">3</div>
+        <svg class="chart good" width="100%" height="42" viewBox="0 0 130 42" preserveAspectRatio="none">
+          <line x1="6" y1="10" x2="124" y2="10" stroke="oklch(0.5 0.06 124 / .5)" stroke-width="1"/>
+          <circle cx="22" cy="30" r="2" fill="#cfcfcf"/><circle cx="48" cy="25" r="2" fill="#cfcfcf"/><circle cx="74" cy="27" r="2" fill="#cfcfcf"/><circle cx="98" cy="21" r="2" fill="#cfcfcf"/>
+          <circle cx="116" cy="17" r="3.6" fill="none" stroke="var(--lime)" stroke-width="1.6"/><circle cx="116" cy="17" r="1.2" fill="var(--lime)"/>
+        </svg>
+      </div>
+      <div class="card metric">
+        <div class="top"><span class="tick" style="background:var(--lime)"></span><span class="lbl">Claude 5h</span><span class="arrow">→</span></div>
+        <div class="num">9<small>%</small></div>
+        <svg class="chart good" width="100%" height="42" viewBox="0 0 130 42" preserveAspectRatio="none">
+          <line x1="6" y1="10" x2="124" y2="10" stroke="oklch(0.5 0.06 124 / .5)" stroke-width="1"/>
+          <circle cx="24" cy="31" r="2" fill="#cfcfcf"/><circle cx="54" cy="28" r="2" fill="#cfcfcf"/><circle cx="86" cy="30" r="2" fill="#cfcfcf"/>
+          <circle cx="116" cy="26" r="3.6" fill="none" stroke="var(--lime)" stroke-width="1.6"/><circle cx="116" cy="26" r="1.2" fill="var(--lime)"/>
+        </svg>
+        <div class="cap">Resets in 2h 40m</div>
+      </div>
+      <div class="card metric">
+        <div class="top"><span class="tick" style="background:var(--ok)"></span><span class="lbl">Vault notes</span><span class="arrow">↗</span></div>
+        <div class="num">1,284</div>
+        <span class="delta">+18 this week</span>
+      </div>
+      <div class="card metric">
+        <div class="top"><span class="tick" style="background:var(--warn)"></span><span class="lbl">Spend today</span><span class="arrow">↘</span></div>
+        <div class="num">$1.12</div>
+        <svg class="chart warn" width="100%" height="42" viewBox="0 0 130 42" preserveAspectRatio="none">
+          <line x1="6" y1="10" x2="124" y2="10" stroke="oklch(0.55 0.1 92 / .5)" stroke-width="1"/>
+          <circle cx="22" cy="23" r="2" fill="#cfcfcf"/><circle cx="52" cy="27" r="2" fill="#cfcfcf"/><circle cx="82" cy="25" r="2" fill="#cfcfcf"/>
+          <circle cx="116" cy="21" r="3.6" fill="none" stroke="var(--warn)" stroke-width="1.6"/><circle cx="116" cy="21" r="1.2" fill="var(--warn)"/>
+        </svg>
+        <div class="cap">Under daily budget</div>
+      </div>
+      <div class="card metric">
+        <div class="top"><span class="tick" style="background:var(--lime)"></span><span class="lbl">Agents ready</span><span class="arrow">→</span></div>
+        <div class="num">7</div>
+        <div class="cap">4 ready · 1 running · 2 idle</div>
+      </div>
+      <div class="card metric">
+        <div class="top"><span class="tick" style="background:var(--ink-3)"></span><span class="lbl">Connectors</span><span class="arrow">→</span></div>
+        <div class="num">4<small>linked</small></div>
+        <div class="cap">Slack · Jira · Notion · GitLab</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { mountGraph } from './graph.js';
+  const g = mountGraph(document.getElementById('plexus'), { count: 156, fill: 0.40 });
+  // calm, explicit, engineer-style status — understated (not a chatty overlay)
+  const SCRIPT = [
+    { word: 'listening', txt: '' },
+    { word: 'speaking',  txt: 'Run 01KVC8 finished. 2 files changed. Tests passed.' },
+    { word: 'listening', txt: '' },
+    { word: 'speaking',  txt: '1 item needs you: approve the Slack summary before it posts.' },
+  ];
+  const say = document.getElementById('vsay'), st = document.getElementById('vstate');
+  let i = -1;
+  (function next(){
+    i = (i+1) % SCRIPT.length; const u = SCRIPT[i];
+    g.set({ speaking: u.word === 'speaking' });
+    st.textContent = 'Wagner — ' + u.word; say.textContent = u.txt;
+    setTimeout(next, u.word === 'speaking' ? 4200 : 2600);
+  })();
+</script>
+</body>
+</html>
