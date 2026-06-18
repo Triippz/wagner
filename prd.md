@@ -4,6 +4,13 @@
 > split, the `run` primitive, and Phase 1 (the wedge). Phases 2–3 are intentionally
 > *directional* — no fake precision on contracts the wedge will teach us.
 >
+> **Product-direction note (2026-06-18):** this PRD is historical for the
+> engineering-platform wedge. `VISION.md` and `PRODUCT.md` are now the product
+> source of truth. Wagner has widened from an engineering/coding platform into a
+> local-first personal OS for daily work: agents, deterministic workflows,
+> knowledge, search, news/research, media/artifact generation, productivity
+> connectors, and dedicated workspaces such as coding.
+>
 > **Provenance:** evolves `apps/wagner/PRODUCT.md` and `apps/wagner/DESIGN.md`. Carries
 > the run/event/transmission engine (`apps/wagner/schemas/*.json`,
 > `apps/wagner/src/store/reducer.ts`). The desktop app is the port-from source, then retired.

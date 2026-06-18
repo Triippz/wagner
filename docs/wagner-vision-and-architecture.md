@@ -1,29 +1,42 @@
 # Wagner — vision & architecture
 
-> Status: proposal (2026-06-16). Supersedes the "Wagner Edge run console" framing.
-> Wagner is the product; the desktop app is one layer of it.
+> Status: living architecture note. `../VISION.md` is the product source of
+> truth; this document explains how the current edge/hub architecture supports
+> that vision.
 >
 > **v2 reframe (2026-06-17):** the five-pillar v1 (Sessions, Vault, Graph, Sync,
 > Voice) is built. v2 widens the product from an *engineering* platform to a
-> **personal command center** — a common operating picture over all your
-> knowledge, agents, projects, and tools, coding being only one of them. See §12.
+> **local-first personal OS** — a common operating picture over daily work:
+> agents, workflows, knowledge, search, media/artifact generation, connectors,
+> projects, and tools. Coding is one heavy workspace, not the product boundary.
+> See §12.
 
 ## 1. What Wagner is
 
-Wagner is a distributed engineering platform for running autonomous coding agents
-and accumulating what they learn into a shared, living knowledge base. Two layers,
-one product:
+Wagner is a local-first, cloud-connected personal OS for daily work. It is the
+operator's command surface for agents, workflows, knowledge, search, connectors,
+and dedicated workspaces. Coding and development are central because they are the
+first heavy workspace, but the product is not a coding IDE: it should also handle
+research, news briefings, image/artifact generation, productivity automation,
+and general search.
 
-- **Edge executes.** A native desktop app runs agent **sessions** against the
-  operator's repos — the oracle plans, a roster of operatives execute. Runs are
-  durable and survive closing the window.
-- **Hub remembers.** An always-on peer holds the shared **Vault** — an
-  Obsidian-style second brain of linked markdown notes that every session reads
-  from and writes back to, synced in real time across teammates.
+The architecture still has two layers, one product:
 
-The model is borrowed from JARVIS / the Karpathy "LLM wiki" pattern, but made
-**distributed**: the vault is not one person's local folder, it is a
-conflict-free replicated knowledge graph shared across the team.
+- **Edge executes.** A native desktop app runs agent **sessions** and local
+  workflows on the operator's machine. For coding, it can drive Codex, Claude
+  Code, and future harnesses against real repos. For broader work, it should
+  dispatch agents, deterministic workflows, connector calls, search/research
+  tasks, and artifact generation without requiring a cloud round trip.
+- **Hub remembers and coordinates.** An always-on peer syncs the shared **Vault**
+  and coordination metadata across devices or teams. The vault is an
+  Obsidian-style second brain of linked markdown notes and typed relationships
+  that sessions, workflows, and connectors read from and write back to.
+
+The model borrows from JARVIS, the Karpathy "LLM wiki" pattern, and Palantir
+Maven-like smart systems in the sense of one operating picture over typed
+knowledge and coordinated action. It is not an OSINT product. It is a personal
+work OS whose vault can remain private, sync across the operator's devices, or be
+shared with a team.
 
 ## 2. The four pillars
 
@@ -34,9 +47,11 @@ conflict-free replicated knowledge graph shared across the team.
 | **Graph** | A traversable view of the vault — notes as nodes, links as edges | edge (UI) |
 | **Sync** | Real-time, offline-first, multi-writer replication of the vault | edge ↔ hub (P2P) |
 
-Designed-for-but-later: **Voice** (a local JARVIS layer — faster-whisper STT +
-Kokoro TTS), **model-agnostic** engine (swap Claude/Codex/local models), and a
-**forkable skeleton** (reskin per operator/client/team).
+Designed-for-but-later has moved into the core vision: **Voice** is first-class
+and text remains equal; the engine should be **model/harness-agnostic** (Codex,
+Claude Code, Claude Agent SDK, OpenAI/other providers, local models); and the
+system should remain extensible enough to reskin, self-host, and share per
+operator/client/team.
 
 ## 3. Grounding — what already exists vs what is net-new
 
@@ -233,18 +248,20 @@ collapse the duplicate tree in the move. Not a now-this-second cutover.
    for the distributed CRDT?
 3. **Voice**: design-for-now-build-later (recommended) vs. in-scope now.
 
-## 12. Wagner v2 — the command center
+## 12. Wagner v2 — the personal OS
 
 v1 made Wagner a distributed *engineering* platform. v2 keeps that engine but
 reframes the product around a single idea the operator stated directly: **a
-common operating picture of everything** — knowledge, learnings, agents,
-projects, and (eventually) the whole productivity stack — run from one surface.
-"Command center" in the operating-picture sense, not the military one.
+common operating picture of daily work** — agents, deterministic workflows,
+knowledge, search, news, media/artifact generation, projects, connectors, and the
+whole productivity stack — run from one surface. "Command center" means an
+operating picture for personal work, not a military or OSINT product.
 
 The pillars don't change; their *scope* widens. The Vault already holds
-knowledge + learnings; the Graph already renders it. v2 adds two new first-class
-nouns (**Agents**, **Connectors**) and promotes the HUD (§6) from "session view"
-to the operating picture across all of them.
+knowledge + learnings; the Graph already renders it. v2 adds first-class
+**Agents**, **Workflows**, **Connectors**, **Search/Research**, and
+**Workspaces**, and promotes the HUD (§6) from "session view" to the operating
+picture across all of them.
 
 ### A. User-authored agents (Claude Agent SDK) — near-term
 

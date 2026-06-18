@@ -1,9 +1,16 @@
-# Wagner platform
+# Wagner
 
-The org engineering platform — *edge executes, hub remembers*. One monorepo, two
-layers: the capability library (skills/agents/commands, repo root) consumed by
-the platform runtime here under `platform/`. See `prd.md` for the vision and
-`docs/spec/constitution.md` for the non-negotiables.
+Wagner is a local-first, cloud-connected personal OS for daily work: a
+voice-first and text-equal operating picture for agents, workflows, knowledge,
+search, productivity connectors, and dedicated workspaces such as coding. It
+leans into tools like Codex and Claude Code, but it is not a coding-only product.
+
+Architecture principle: *edge executes, hub remembers*. The desktop edge runs
+local agents, workflows, voice, vault, and workspace activity on the operator's
+machine. The hub syncs curated knowledge and coordination metadata across devices
+or teams without becoming the required path for local work. See `VISION.md` for
+the product vision, `PRODUCT.md` for the product register, and
+`docs/spec/constitution.md` for the platform non-negotiables.
 
 ## Layout
 
