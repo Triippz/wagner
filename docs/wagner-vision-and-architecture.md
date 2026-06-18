@@ -187,6 +187,9 @@ The entry-screen redesign decided earlier folds in here:
 
 ## 10. Repo strategy — graduate Wagner out of dev-ai-utilities
 
+> **STATUS: DONE.** Wagner now lives in its own standalone `wagner/` repository
+> (the monorepo layout below). The original recommendation is kept for context.
+
 Recommendation: **yes, move Wagner to its own repository.** It has crossed from
 "a utility inside a Claude Code plugin marketplace" to a shipping distributed
 product with a fundamentally different lifecycle (signed Tauri release builds,
