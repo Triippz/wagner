@@ -2,6 +2,11 @@
 
 > Status: proposal (2026-06-16). Supersedes the "Wagner Edge run console" framing.
 > Wagner is the product; the desktop app is one layer of it.
+>
+> **v2 reframe (2026-06-17):** the five-pillar v1 (Sessions, Vault, Graph, Sync,
+> Voice) is built. v2 widens the product from an *engineering* platform to a
+> **personal command center** — a common operating picture over all your
+> knowledge, agents, projects, and tools, coding being only one of them. See §12.
 
 ## 1. What Wagner is
 
@@ -171,6 +176,10 @@ The entry-screen redesign decided earlier folds in here:
 | **6** | Hub vault store + multi-teammate sync + presence | edge+hub |
 | **later** | Voice (faster-whisper + Kokoro), model-agnostic engine, forkable skeleton | both |
 
+v1 phases 0–6 + voice + hub are **shipped**. The next arc is **v2 — the command
+center** (§12); near-term items there are voice audio I/O, then user-authored
+agents via the Claude Agent SDK.
+
 ## 9. Top risks
 
 1. **The projector race** (file watcher ↔ CRDT, both directions). Narrow but real
@@ -223,3 +232,143 @@ collapse the duplicate tree in the move. Not a now-this-second cutover.
    (single-machine, immediately useful) before distributed sync, or go straight
    for the distributed CRDT?
 3. **Voice**: design-for-now-build-later (recommended) vs. in-scope now.
+
+## 12. Wagner v2 — the command center
+
+v1 made Wagner a distributed *engineering* platform. v2 keeps that engine but
+reframes the product around a single idea the operator stated directly: **a
+common operating picture of everything** — knowledge, learnings, agents,
+projects, and (eventually) the whole productivity stack — run from one surface.
+"Command center" in the operating-picture sense, not the military one.
+
+The pillars don't change; their *scope* widens. The Vault already holds
+knowledge + learnings; the Graph already renders it. v2 adds two new first-class
+nouns (**Agents**, **Connectors**) and promotes the HUD (§6) from "session view"
+to the operating picture across all of them.
+
+### A. User-authored agents (Claude Agent SDK) — near-term
+
+Today agents are a fixed oracle/operative **roster** run by spawning the
+`claude`/`codex` CLI as a child and parsing stream-json (`edge/host/src/cli/`,
+`orchestrator/roster.rs`). v2 makes **agents a thing the operator defines**:
+
+- An **agent definition** = `{ name, system prompt, model, tools/harness,
+  allowed dirs }`, stored as a Vault note (dogfood the knowledge model — agents
+  are knowledge too) so they version, link, and sync like everything else.
+- Run them **locally** via the **Claude Agent SDK** rather than only the CLI —
+  programmatic control over system prompt, model, and tool surface per agent.
+  The existing CLI driver stays as one backend behind the `AgentPool` trait; the
+  SDK becomes a second backend (model-agnostic seam already planned in §2).
+- **Custom system prompts / models / harnesses per agent** is the headline
+  requirement — the agent definition is exactly that knob.
+
+### B. Connectors — the productivity stack (later, the big widening)
+
+Wagner reaches beyond coding: **email, Slack, Discord, calendar, docs** — run
+the operator's productivity tools from the same surface. The natural seam is
+**MCP** (many of these connectors already exist as MCP servers in the operator's
+environment). Agents (A) act over Connectors; their outputs land in the Vault as
+notes; the Graph/HUD shows the operating picture. This is the step that turns
+Wagner from "coding tool" into "personal agentic OS" — and the largest scope, so
+it lands last and incrementally (one connector at a time).
+
+### C. Cloud agents / agent registry — stretch
+
+Extend the **Hub** (already the always-on peer + vault sync) to **store agent
+definitions + config** so others can run them, and — stretch — to **run agents
+in the cloud**, not just on the operator's machine. Article IX still binds:
+curated agent configs + metadata may sync; raw transcripts stay edge-local.
+Depends on A (definitions exist) and reuses the hub sync stack from Phase 6.
+
+### v2 roadmap
+
+| Phase | Deliverable | Depends on |
+|---|---|---|
+| **v2.0** | **Voice audio I/O** — mic→STT, TTS→speaker loop (carried from v1 "later"; see handoff) | voice engine (done) |
+| **v2.1** | **Agent definitions** — author/store agents as Vault notes (name, system prompt, model, tools, dirs) + UI | Vault (done) |
+| **v2.2** | **Claude Agent SDK backend** behind `AgentPool` — run authored agents locally with per-agent prompt/model/harness | v2.1 |
+| **v2.3** | **Connectors v1** — first MCP-backed non-coding tool (pick one: email *or* Slack), outputs → Vault notes | v2.2 |
+| **v2.4** | **HUD = operating picture** — one surface over sessions + agents + vault + connectors | v2.1–v2.3 |
+| **later** | More connectors (Discord, calendar, docs…), one at a time | v2.3 |
+| **stretch** | **Cloud agents / registry** — hub stores agent configs for others; run-in-cloud | v2.1 + hub (done) |
+
+Open v2 decisions: (1) Agent SDK = TypeScript or Python SDK, and where it runs
+relative to the Tauri-free host (mirror the voice-sidecar lifecycle?). (2) First
+connector to prove the MCP seam. (3) Does the SDK backend *replace* the CLI
+driver for authored agents, or coexist (recommended: coexist).
+
+## 13. v2 backlog — operator additions (2026-06-17)
+
+Captured as direction; not yet sequenced into phases. Several are product-shaping
+(reshape v2.4's HUD and the engine), not single features.
+
+1. **Obsidian-core, local-first, optional cloud sync.** Make the Obsidian vault
+   *the* knowledge layer, not a side feature: local-first by default, cloud sync
+   opt-in. Wagner already writes Obsidian-compatible `.md` + `[[wikilinks]]` via
+   the projector — this elevates it to a primary surface (embedded editor +
+   graph). Obsidian the app is closed-source; the *format* is open and is what we
+   target. OSS embeddable editors to evaluate: Logseq, SilverBullet, Foam.
+   Refs: SurrealDB-as-KG article (operator-supplied), `colleague-skill#125`.
+
+2. **SurrealDB as the distributed knowledge-graph backend.** Lean on SurrealDB
+   (already the vault's store + BM25 index) for the distributed graph — live
+   queries, semantic/contextual storage, possibly TiKV-backed distribution.
+   **Open architectural fork vs. the shipped loro+iroh CRDT sync** (§5): is
+   SurrealDB a *complement* (semantic index/query) or a *replacement* for the
+   CRDT transport? Do not silently swap — decide deliberately. Ref: operator's
+   SurrealDB-KG article.
+
+3. **General productivity tool, not a coding IDE.** Stop optimizing the UI for
+   coding/dev specifically. Coding is one workspace among many (notes, agents,
+   connectors, projects). This directly shapes v2.4 (HUD = operating picture) and
+   item 8 (customizable UI) — the shell must not assume "a repo + a run."
+
+4. **Self-hostable multi-tenant auth — not just SSO/SAML.** Anyone can host the
+   hub in the cloud, create users via **username/password** (or similar), and
+   invite their own people. The hub already has OIDC; this adds a
+   self-host-friendly local auth + invite + tenant model. Article IX
+   (metadata/curated-only sync) still binds per tenant.
+
+5. **Deterministic + multi-provider headless workflows.** Beyond conversational
+   agents: run **deterministic workflows** headlessly. Use the Agent SDK for
+   Claude *and* OpenAI/others (multi-provider, model-agnostic — extends §2's
+   model-agnostic engine + the `AgentPool` trait). A workflow engine — Temporal
+   is the heavy reference; prefer something lightweight (or in-process durable
+   steps) unless durability demands more. This generalizes v2.2.
+
+6. **Easy MCP server management.** First-class UI to add/configure MCP servers
+   and make them trivially usable by agents (item 5) and connectors (§12.B). MCP
+   is the connector seam; this is its control panel.
+
+7. **Plugin system (code-based) + plugin registry.** Plugins authored in code; a
+   **central repository** for community plugins plus support for **private**
+   plugins. Ties to item 8 (UI extension points) and item 6 (MCP/agents as plugin
+   surface). Big — needs a plugin API/contract and a trust/sandboxing model.
+
+8. **Fully customizable UI (VSCode-style).** Make as much of the UI configurable
+   as possible — layout, panels, theme, keybindings — extensible via plugins
+   (item 7). This and item 3 push the shell toward a generic, dockable,
+   theme-able workbench rather than a fixed coding console.
+
+9. **Pluggable harnesses + models — agentic coding beyond Claude/Codex.** Treat
+   the *harness* (the agentic coding tool) as swappable, and the *model* behind it
+   as independent. The seam already exists: agents run behind the `AgentPool`
+   trait with a per-harness event mapper (`events/map_claude.rs`,
+   `events/map_codex.rs`) — each new harness = a driver invocation + a mapper.
+   Targets:
+   - **Cursor (incl. its CLI)** and **OpenCode** as first-class harness backends,
+     alongside the existing `claude`/`codex`.
+   - **Self-hosted models** and **alternative cloud models** (e.g. **GLM 5.2**)
+     selectable per agent — extends the model-agnostic engine (§2) and the
+     per-agent model knob (§12.A, §13.5).
+   - **Skill portability:** the same skill packs (SKILL.md) the operator uses in
+     Claude/Codex must work across harnesses — a harness-neutral skill-loading
+     contract, not per-harness rewrites. This is the hard part (each harness
+     discovers/loads skills differently).
+   Relationship: §13.5 = programmatic Agent-SDK workflows (multi-provider via
+   SDK); this item = full third-party agentic harnesses as drop-in backends. Both
+   ride the same `AgentPool` seam.
+
+**Priority note (operator, 2026-06-17):** *before* any of §13, get the existing
+v1 product **working as intended** end-to-end (not just CI-green). That is the
+immediate focus; §13 is the queue behind it.
