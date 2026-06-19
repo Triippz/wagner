@@ -9,7 +9,7 @@ use wagner_edge_host::orchestrator::{
     TestOutcome, Workflow,
 };
 use wagner_edge_host::memory::{MemoryInput, MemoryRecord, MemoryStore};
-use wagner_edge_host::bus::{Event, RunEvent, UiEvent, VoiceEvent};
+use wagner_edge_host::bus::{Command, Event, RunCommand, RunEvent, UiEvent, VoiceEvent};
 use crate::bus_gateway::UiGateway;
 use crate::pool::CliAgentPool;
 use crate::voice_lifecycle::SidecarState;
@@ -885,6 +885,12 @@ pub fn abort(
     gateway: State<'_, UiGateway>,
     run_id: Option<String>,
 ) -> Result<(), String> {
+    // Route the action through the validated command intake (011 P3). The effect
+    // (terminating the task) stays inline here until 011 P4 inverts it onto a
+    // participant; dispatch is the authz/audit chokepoint. Never block the abort
+    // itself on intake — a run must always be stoppable.
+    let _ = gateway.dispatch(Command::Run(RunCommand::Abort { run_id: run_id.clone() }));
+
     let runs_root = app
         .path()
         .app_data_dir()

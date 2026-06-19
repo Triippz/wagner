@@ -13,8 +13,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use ulid::Ulid;
 use wagner_edge_host::bus::{
-    Bus, Envelope, Event, EventId, NodeId, ParticipantId, ParticipantKind, RecvError, RunEvent,
-    Scope, StreamId, Subscription, Timestamp, UiEvent, VoiceEvent,
+    Accepted, AllowAll, Bus, Command, DispatchError, Envelope, Event, EventId, NodeId,
+    ParticipantId, ParticipantKind, RecvError, RunEvent, Scope, StreamId, Subscription, Timestamp,
+    UiEvent, VoiceEvent,
 };
 
 /// Identity stamped on envelopes the shell publishes on behalf of the engine/UI.
@@ -61,6 +62,13 @@ impl UiGateway {
     pub fn publish_workspace(&self, workspace: &str, payload: Event) {
         self.bus.publish(envelope(StreamId::Workspace(workspace.to_string()), payload));
     }
+
+    /// Intake an action command through the validated chokepoint (011 P3). v1
+    /// authorizes with [`AllowAll`] (single operator); the policy seam tightens
+    /// without touching call sites.
+    pub fn dispatch(&self, command: Command) -> Result<Accepted, DispatchError> {
+        self.bus.dispatch(command, &AllowAll)
+    }
 }
 
 /// Map a typed bus event to its legacy `(channel, payload)`. Returns `None` for
@@ -89,6 +97,17 @@ pub fn project(event: &Event) -> Option<(&'static str, serde_json::Value)> {
 /// legacy Tauri channel. Survives a slow tick (`Lagged`); stops when the bus
 /// closes (app exit).
 pub fn spawn(bus: Arc<Bus>, app: AppHandle) {
+    // Drain the command intake so `dispatch` never backs up. In P3 dispatched
+    // commands are validated + authorized + recorded here; 011 P4 replaces this
+    // drain with the AgentRegistry that routes each command to a participant.
+    if let Some(mut commands) = bus.take_commands() {
+        tauri::async_runtime::spawn(async move {
+            while let Some(cmd) = commands.recv().await {
+                eprintln!("[wagner-edge] command accepted: {:?}", cmd.command);
+            }
+        });
+    }
+
     tauri::async_runtime::spawn(async move {
         let mut sub = bus.subscribe(Subscription { topic: "*".into(), filter: None });
         loop {

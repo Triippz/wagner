@@ -182,3 +182,8 @@ path = "tests/unit/bus_additive_version.rs"
 [[test]]
 name = "bus_runtime"
 path = "tests/unit/bus_runtime.rs"
+
+# 011 P3 — command intake (dispatch: validate → authorize → stamp → enqueue).
+[[test]]
+name = "bus_dispatch"
+path = "tests/unit/bus_dispatch.rs"

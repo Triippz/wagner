@@ -16,9 +16,14 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
-use super::{Envelope, Event, StreamId, Subscription};
+use super::dispatch::{Accepted, CommandAuthorizer, CommandEnvelope, DispatchError};
+use super::{Command, Envelope, Event, EventId, StreamId, Subscription};
+
+/// The command-intake schema (the exported catalog entry), embedded for boundary
+/// validation of JSON commands (FR-015 / 011 P3).
+const COMMAND_SCHEMA: &str = include_str!("../../schemas/bus/command.json");
 
 /// The in-process event bus. Cheap to `Arc`-share across tasks; `publish` is sync
 /// and non-blocking (a slow subscriber lags, it does not back up the bus).
@@ -26,14 +31,65 @@ pub struct Bus {
     tx: broadcast::Sender<Envelope>,
     /// Next per-stream `seq` to assign. `publish` stamps the authoritative value.
     seqs: Mutex<HashMap<StreamId, u64>>,
+    /// Bounded command intake (011 P3): `dispatch` enqueues here; the registry
+    /// (011 P4) claims the receiver via [`Bus::take_commands`].
+    cmd_tx: mpsc::Sender<CommandEnvelope>,
+    cmd_rx: Mutex<Option<mpsc::Receiver<CommandEnvelope>>>,
 }
 
 impl Bus {
     /// Create a bus whose fan-out buffer holds `capacity` envelopes per subscriber
-    /// before the slowest lags. `capacity` must be ≥ 1.
+    /// before the slowest lags, and whose command intake buffers `capacity`
+    /// commands before applying backpressure. `capacity` must be ≥ 1.
     pub fn new(capacity: usize) -> Self {
         let (tx, _rx) = broadcast::channel(capacity.max(1));
-        Self { tx, seqs: Mutex::new(HashMap::new()) }
+        let (cmd_tx, cmd_rx) = mpsc::channel(capacity.max(1));
+        Self {
+            tx,
+            seqs: Mutex::new(HashMap::new()),
+            cmd_tx,
+            cmd_rx: Mutex::new(Some(cmd_rx)),
+        }
+    }
+
+    /// Intake one command (011 P3): **validate** (by construction — a typed
+    /// `Command` is well-formed), **authorize** (Article IX), **stamp** an id, and
+    /// **enqueue** for the registry. The single validated, authorized way to act.
+    pub fn dispatch(
+        &self,
+        command: Command,
+        authz: &dyn CommandAuthorizer,
+    ) -> Result<Accepted, DispatchError> {
+        authz.authorize(&command).map_err(DispatchError::Denied)?;
+        let id = EventId(ulid::Ulid::new());
+        let envelope = CommandEnvelope { id: id.clone(), command };
+        match self.cmd_tx.try_send(envelope) {
+            Ok(()) => Ok(Accepted { id }),
+            Err(mpsc::error::TrySendError::Full(_)) => Err(DispatchError::Backpressure),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(DispatchError::NoConsumer),
+        }
+    }
+
+    /// Intake a command that arrived as JSON (e.g. from a plugin or the frontend):
+    /// **validate against the command schema** at the boundary (FR-015), then
+    /// deserialize and [`dispatch`](Self::dispatch). Schema-invalid input is
+    /// rejected before it can become a typed `Command`.
+    pub fn dispatch_json(
+        &self,
+        raw: &serde_json::Value,
+        authz: &dyn CommandAuthorizer,
+    ) -> Result<Accepted, DispatchError> {
+        crate::schema::validate(COMMAND_SCHEMA, raw)
+            .map_err(|e| DispatchError::Invalid(e.to_string()))?;
+        let command: Command = serde_json::from_value(raw.clone())
+            .map_err(|e| DispatchError::Invalid(e.to_string()))?;
+        self.dispatch(command, authz)
+    }
+
+    /// Claim the command-intake receiver (once). The registry (011 P4) calls this
+    /// to drain dispatched commands; returns `None` if already taken.
+    pub fn take_commands(&self) -> Option<mpsc::Receiver<CommandEnvelope>> {
+        self.cmd_rx.lock().expect("bus cmd_rx not poisoned").take()
     }
 
     /// Stamp the authoritative per-stream `seq` (0-based, monotonic per

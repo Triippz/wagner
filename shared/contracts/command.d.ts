@@ -43,12 +43,26 @@ export type Command =
 /**
  * Run-namespace intents.
  */
-export type RunCommand = {
-  type: "start";
-  data: {
-    goal: string;
-  };
-};
+export type RunCommand =
+  | {
+      type: "start";
+      data: {
+        goal: string;
+      };
+    }
+  | {
+      type: "abort";
+      data: {
+        run_id?: string | null;
+      };
+    }
+  | {
+      type: "steer";
+      data: {
+        run_id: string;
+        text: string;
+      };
+    };
 /**
  * Goal-namespace intents.
  */

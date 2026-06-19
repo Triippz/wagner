@@ -35,6 +35,7 @@
 //! (`specs/012` design §13.7).
 
 mod command;
+mod dispatch;
 mod envelope;
 mod event;
 mod manifest;
@@ -42,6 +43,7 @@ mod participant;
 mod runtime;
 
 pub use command::{Command, GoalCommand, RunCommand, UiCommand, VaultCommand, VoiceCommand};
+pub use dispatch::{Accepted, AllowAll, CommandAuthorizer, CommandEnvelope, DispatchError};
 pub use envelope::{Envelope, EventId, Scope, StreamId, Timestamp};
 pub use event::{Event, GoalEvent, RunEvent, UiEvent, VaultEvent, VoiceEvent};
 pub use manifest::{Capability, Namespace, PluginManifest, SchemaRef, StabilityTier};

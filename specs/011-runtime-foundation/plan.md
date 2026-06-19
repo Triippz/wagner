@@ -99,7 +99,13 @@ workflow ops) through dispatch; keep pure reads (`get_initial_state`, `vault_gra
 **Tests:** each migrated command yields the right bus event(s); authz-deny path;
 schema-invalid command rejected; **abort still terminates the run** (reuse the B3
 `aborted_marks_run_terminal` test).
-**Acceptance:** [ ] `make verify` + `make accept` green [ ] actions flow command→intake→bus.
+**Acceptance:** [x] `make verify` + `make accept` green [x] actions flow command→intake→bus.
+**✅ DONE — `edge/host/src/bus/dispatch.rs` + `Bus::dispatch`/`dispatch_json`/`take_commands`
+(bounded mpsc intake): validate (schema, JSON boundary) → authorize (`CommandAuthorizer`
+Article IX seam, v1 `AllowAll`) → stamp → enqueue. 5 tests (accept, deny, schema-invalid,
+json, backpressure). `abort` routed through `dispatch` (effect stays inline until P4 inverts
+it); gateway drains the intake (P4 replaces with the registry). Command leaves added:
+`RunCommand::{Abort,Steer}`.**
 
 ### Step 4 — Agent trait + registry; goal loop becomes one participant
 **Why:** the pluggability contract every future agent/connector uses — and the inversion

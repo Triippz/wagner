@@ -40,6 +40,11 @@ impl Contract for Command {
 pub enum RunCommand {
     /// `run.start` — begin a run for a goal.
     Start { goal: String },
+    /// `run.abort` — terminate a run (`None` = every live run; the single-session
+    /// UI sends no id). Migrated through `dispatch` in 011 P3.
+    Abort { run_id: Option<String> },
+    /// `run.steer` — inject a live steering instruction into a running session.
+    Steer { run_id: String, text: String },
 }
 
 /// Goal-namespace intents.
