@@ -299,10 +299,10 @@
       ]
     },
     "RunEvent": {
-      "description": "Run-namespace facts.",
+      "description": "Run-namespace facts. The migrated `wagner://*` run-execution channels land\nhere (P2): the bus carries the real payloads so the `UiGateway` can re-emit\nthe legacy Tauri events byte-identically.",
       "oneOf": [
         {
-          "description": "`run.finished` — a run reached a terminal state.",
+          "description": "`run.finished` — a run reached a terminal state (seed; `Snapshot` carries\nthe full live + terminal state for the UI).",
           "type": "object",
           "properties": {
             "type": {
@@ -325,6 +325,86 @@
                 "ok"
               ]
             }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://run` — full run-state snapshot (live progress + terminal).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "snapshot"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://event` — operative floor activity during a run.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "activity"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://transmission` — a gate/permission prompt awaiting a human answer.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "transmission"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://workflow` — a workflow step record.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "workflow_step"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://workflow-done` — terminal workflow summary.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "workflow_done"
+            },
+            "data": true
           },
           "required": [
             "type",
@@ -437,6 +517,22 @@
             "data"
           ],
           "additionalProperties": false
+        },
+        {
+          "description": "`wagner://voice-download` — model download progress.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "download_progress"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -461,6 +557,35 @@
               "additionalProperties": false,
               "required": [
                 "surface"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://panel` — an agent-authored UI spec panel. `spec` is arbitrary\nagent JSON by design (the panel DSL), so it stays a `Value`.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "panel"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "operative_id": {
+                  "type": "string"
+                },
+                "spec": true
+              },
+              "additionalProperties": false,
+              "required": [
+                "operative_id",
+                "spec"
               ]
             }
           },

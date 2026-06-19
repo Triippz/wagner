@@ -6,6 +6,8 @@
 //! `wagner_edge_host::permission_server` and are tested headlessly there; this
 //! module is the thin Tauri shell glue that wires them together.
 
+use crate::bus_gateway::UiGateway;
+use wagner_edge_host::bus::{Event, RunEvent};
 use wagner_edge_host::transmissions::TransmissionRegistry;
 use serde_json::Value;
 use std::sync::Arc;
@@ -27,14 +29,14 @@ pub struct StartedGate {
 /// server rejects any request lacking the token (M2). Kept here, with the
 /// transport + policy, rather than in the Tauri command module.
 pub async fn start_gate_server(
-    app: &tauri::AppHandle,
+    gateway: UiGateway,
+    run_id: &str,
     app_data: &std::path::Path,
     reg: Arc<TransmissionRegistry>,
     blocked_timeout_secs: u64,
     blocked_halt: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<StartedGate, String> {
     use std::sync::atomic::Ordering;
-    use tauri::Emitter;
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -65,14 +67,16 @@ pub async fn start_gate_server(
         prompt_tool: wagner_edge_host::cli::GATE_PROMPT_TOOL.to_string(),
     };
 
-    let app_for_emit = app.clone();
+    let gateway_for_emit = gateway;
+    let run_id = run_id.to_string();
     let handler = move |args: Value| {
         let reg = reg.clone();
-        let app = app_for_emit.clone();
+        let gateway = gateway_for_emit.clone();
+        let run_id = run_id.clone();
         let blocked_halt = blocked_halt.clone();
         async move {
             let emit = move |tj: Value| {
-                let _ = app.emit("wagner://transmission", tj);
+                gateway.publish_run(&run_id, Event::Run(RunEvent::Transmission(tj)));
             };
             let on_timeout = move || blocked_halt.store(true, Ordering::SeqCst);
             let raised_at = chrono::Utc::now().to_rfc3339();

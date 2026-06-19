@@ -4,6 +4,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Contract, StabilityTier};
+use crate::events::WagnerEvent;
+use crate::state::Run;
+use crate::voice::ModelProgress;
 
 /// A namespaced, past-tense fact carried by the bus. Adjacently tagged as
 /// `{ "type": <namespace>, "data": <leaf> }`. The namespace set is the **stable
@@ -74,12 +77,31 @@ impl Event {
 // One representative seed leaf per namespace. The full leaf set is derived during
 // `011` P0 (the 7 `wagner://*` channels + voice) and added additively (FR-006).
 
-/// Run-namespace facts.
+/// Run-namespace facts. The migrated `wagner://*` run-execution channels land
+/// here (P2): the bus carries the real payloads so the `UiGateway` can re-emit
+/// the legacy Tauri events byte-identically.
+//
+// ponytail: the `Snapshot`/`Activity`/`DownloadProgress` payloads are
+// schema-opaque (`#[schemars(with = "serde_json::Value")]`) so we don't derive
+// JsonSchema across the whole `Run`/`WagnerEvent` graph during the migration —
+// serde still carries the real typed value, so re-emission is byte-identical.
+// P7 tightens these to full schemas when the TS reducer folds them directly.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunEvent {
-    /// `run.finished` — a run reached a terminal state.
+    /// `run.finished` — a run reached a terminal state (seed; `Snapshot` carries
+    /// the full live + terminal state for the UI).
     Finished { run_id: String, ok: bool },
+    /// `wagner://run` — full run-state snapshot (live progress + terminal).
+    Snapshot(#[schemars(with = "serde_json::Value")] Box<Run>),
+    /// `wagner://event` — operative floor activity during a run.
+    Activity(#[schemars(with = "serde_json::Value")] Box<WagnerEvent>),
+    /// `wagner://transmission` — a gate/permission prompt awaiting a human answer.
+    Transmission(serde_json::Value),
+    /// `wagner://workflow` — a workflow step record.
+    WorkflowStep(serde_json::Value),
+    /// `wagner://workflow-done` — terminal workflow summary.
+    WorkflowDone(serde_json::Value),
 }
 
 /// Goal-namespace facts.
@@ -104,6 +126,8 @@ pub enum VaultEvent {
 pub enum VoiceEvent {
     /// `voice.utterance_transcribed` — STT produced text for an utterance.
     UtteranceTranscribed { text: String },
+    /// `wagner://voice-download` — model download progress.
+    DownloadProgress(#[schemars(with = "serde_json::Value")] Box<ModelProgress>),
 }
 
 /// UI-namespace facts.
@@ -112,4 +136,7 @@ pub enum VoiceEvent {
 pub enum UiEvent {
     /// `ui.surface_focused` — a workspace surface gained focus.
     SurfaceFocused { surface: String },
+    /// `wagner://panel` — an agent-authored UI spec panel. `spec` is arbitrary
+    /// agent JSON by design (the panel DSL), so it stays a `Value`.
+    Panel { operative_id: String, spec: serde_json::Value },
 }

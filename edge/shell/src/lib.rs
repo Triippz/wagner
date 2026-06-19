@@ -4,6 +4,7 @@
 //! headless library) to a real desktop window: IPC commands, tray lifecycle,
 //! loopback permission gate, and macOS window-hide behaviour.
 
+pub mod bus_gateway;
 pub mod commands;
 pub mod gate;
 pub mod pool;
@@ -75,6 +76,14 @@ pub fn run() {
                 wagner_edge_host::memory::MemoryStore::open(&app_data.join("memory-db"), "local"),
             )?;
             app.manage(store);
+
+            // Event bus (011 P1/P2): the UiGateway re-emits typed bus events to
+            // the legacy wagner://* Tauri channels, so the React surface is
+            // unchanged while the emit side migrates onto the bus. Spawned before
+            // any run can publish.
+            let bus = Arc::new(wagner_edge_host::bus::Bus::new(1024));
+            bus_gateway::spawn(bus.clone(), app.handle().clone());
+            app.manage(bus_gateway::UiGateway::new(bus));
 
             // System tray — the visible anchor when the window is hidden. Built
             // here (not in tauri.conf) so its handlers can flip the Dock icon with

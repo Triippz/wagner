@@ -96,7 +96,7 @@ impl std::fmt::Display for ModelState {
 /// Serialised by the shell into the `wagner://voice-download` Tauri event with
 /// keys `model` / `state` / `received` / `total` (camelCase intentionally not
 /// applied — the UI lane's contract uses these exact names).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelProgress {
     /// Model id (matches `ModelDef::id`): `"stt"` | `"tts_model"` | `"tts_voices"`.
     pub model: String,

@@ -72,15 +72,38 @@ export type Event =
       };
     };
 /**
- * Run-namespace facts.
+ * Run-namespace facts. The migrated `wagner://*` run-execution channels land
+ * here (P2): the bus carries the real payloads so the `UiGateway` can re-emit
+ * the legacy Tauri events byte-identically.
  */
-export type RunEvent = {
-  type: "finished";
-  data: {
-    run_id: string;
-    ok: boolean;
-  };
-};
+export type RunEvent =
+  | {
+      type: "finished";
+      data: {
+        run_id: string;
+        ok: boolean;
+      };
+    }
+  | {
+      type: "snapshot";
+      data: unknown;
+    }
+  | {
+      type: "activity";
+      data: unknown;
+    }
+  | {
+      type: "transmission";
+      data: unknown;
+    }
+  | {
+      type: "workflow_step";
+      data: unknown;
+    }
+  | {
+      type: "workflow_done";
+      data: unknown;
+    };
 /**
  * Goal-namespace facts.
  */
@@ -104,21 +127,34 @@ export type VaultEvent = {
 /**
  * Voice-namespace facts.
  */
-export type VoiceEvent = {
-  type: "utterance_transcribed";
-  data: {
-    text: string;
-  };
-};
+export type VoiceEvent =
+  | {
+      type: "utterance_transcribed";
+      data: {
+        text: string;
+      };
+    }
+  | {
+      type: "download_progress";
+      data: unknown;
+    };
 /**
  * UI-namespace facts.
  */
-export type UiEvent = {
-  type: "surface_focused";
-  data: {
-    surface: string;
-  };
-};
+export type UiEvent =
+  | {
+      type: "surface_focused";
+      data: {
+        surface: string;
+      };
+    }
+  | {
+      type: "panel";
+      data: {
+        operative_id: string;
+        spec: unknown;
+      };
+    };
 
 /**
  * The unit carried by the bus: a typed `Event` payload wrapped with identity,

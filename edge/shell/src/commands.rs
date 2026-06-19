@@ -9,6 +9,8 @@ use wagner_edge_host::orchestrator::{
     TestOutcome, Workflow,
 };
 use wagner_edge_host::memory::{MemoryInput, MemoryRecord, MemoryStore};
+use wagner_edge_host::bus::{Event, RunEvent, UiEvent, VoiceEvent};
+use crate::bus_gateway::UiGateway;
 use crate::pool::CliAgentPool;
 use crate::voice_lifecycle::SidecarState;
 use wagner_edge_host::state::{ConsoleInput, Guardrails, Run};
@@ -17,7 +19,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use wagner_edge_host::schema::WORKFLOW_STEP_EVENT_SCHEMA;
 
@@ -112,7 +114,7 @@ fn append_goal(mut run: Run, text: String, now: String) -> Run {
 /// into a struct so both `start_run` (fresh) and `resume_run` (reloaded) build it
 /// the same way (and to keep the spawn signature off the clippy too-many-args path).
 struct SpawnLoop {
-    app: AppHandle,
+    gateway: UiGateway,
     run: Run,
     roster: Roster,
     cwd: std::path::PathBuf,
@@ -128,7 +130,7 @@ struct SpawnLoop {
 /// and `resume_run` so the two never drift.
 fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
     let SpawnLoop {
-        app,
+        gateway,
         run,
         roster,
         cwd,
@@ -138,7 +140,8 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
         blocked_halt,
         console,
     } = s;
-    let app_for_loop = app;
+    let run_id = run.run_id.clone();
+    let gateway_for_loop = gateway;
     let console_for_loop = console;
     let suite_for_loop = suite_command;
     let blocked_for_loop = blocked_halt;
@@ -148,9 +151,12 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
         // and their skill prompt; Codex agents get theirs. The pool routes the
         // loop's plan/judge to the lead and each subtask to its assigned agent.
         let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
-        let app_for_emit = app_for_loop.clone();
+        // Emit sides now publish typed events to the bus; the UiGateway re-emits
+        // the legacy wagner://* Tauri channels (011 P2).
+        let g_emit = gateway_for_loop.clone();
+        let rid_emit = run_id.clone();
         let emit = move |ev: wagner_edge_host::events::WagnerEvent| {
-            let _ = app_for_emit.emit("wagner://event", ev);
+            g_emit.publish_run(&rid_emit, Event::Run(RunEvent::Activity(Box::new(ev))));
         };
         // The suite shell-out is blocking and arbitrarily long; offload it to a
         // blocking thread so it never starves the async runtime (M4).
@@ -174,16 +180,18 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
                 .then_some(wagner_edge_host::state::HaltReason::BlockedTimeout)
         };
         // Live snapshot each phase/iteration → mission bar updates in real time.
-        let app_for_progress = app_for_loop.clone();
+        let g_progress = gateway_for_loop.clone();
+        let rid_progress = run_id.clone();
         let progress = move |r: &wagner_edge_host::state::Run| {
-            let _ = app_for_progress.emit("wagner://run", r.clone());
+            g_progress.publish_run(&rid_progress, Event::Run(RunEvent::Snapshot(Box::new(r.clone()))));
         };
         // An agent-authored UI-spec panel → the inspector's "AGENT VIEW" (P5).
-        let app_for_panel = app_for_loop.clone();
+        let g_panel = gateway_for_loop.clone();
+        let rid_panel = run_id.clone();
         let emit_panel = move |operative_id: &str, spec: serde_json::Value| {
-            let _ = app_for_panel.emit(
-                "wagner://panel",
-                serde_json::json!({ "operative_id": operative_id, "spec": spec }),
+            g_panel.publish_run(
+                &rid_panel,
+                Event::Ui(UiEvent::Panel { operative_id: operative_id.to_string(), spec }),
             );
         };
 
@@ -201,7 +209,7 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
             },
         )
         .await;
-        let _ = app_for_loop.emit("wagner://run", final_run);
+        gateway_for_loop.publish_run(&run_id, Event::Run(RunEvent::Snapshot(Box::new(final_run))));
     })
 }
 
@@ -301,6 +309,7 @@ pub async fn start_run(
     mgr: State<'_, RunManager>,
     reg: State<'_, Arc<TransmissionRegistry>>,
     store: State<'_, MemoryStore>,
+    gateway: State<'_, UiGateway>,
     goal: String,
     docs: Vec<String>,
     guardrails: Option<GuardrailConfig>,
@@ -371,7 +380,8 @@ pub async fn start_run(
     // iteration and promotes the stall to a whole-run halt (T042/FR-016).
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
-        &app,
+        gateway.inner().clone(),
+        &run_id,
         &app_data,
         reg.inner().clone(),
         u64::from(run.guardrails.blocked_timeout_secs),
@@ -380,7 +390,7 @@ pub async fn start_run(
     .await?;
 
     let task = spawn_run_loop(SpawnLoop {
-        app: app.clone(),
+        gateway: gateway.inner().clone(),
         run,
         roster,
         cwd: project_cwd.clone(),
@@ -413,6 +423,7 @@ pub async fn resume_run(
     app: AppHandle,
     mgr: State<'_, RunManager>,
     reg: State<'_, Arc<TransmissionRegistry>>,
+    gateway: State<'_, UiGateway>,
     run_id: String,
 ) -> Result<(), String> {
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -432,7 +443,8 @@ pub async fn resume_run(
 
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
-        &app,
+        gateway.inner().clone(),
+        &run_id,
         &app_data,
         reg.inner().clone(),
         u64::from(run.guardrails.blocked_timeout_secs),
@@ -441,7 +453,7 @@ pub async fn resume_run(
     .await?;
 
     let task = spawn_run_loop(SpawnLoop {
-        app: app.clone(),
+        gateway: gateway.inner().clone(),
         run,
         roster,
         cwd: project_cwd,
@@ -472,6 +484,7 @@ pub async fn add_goal(
     app: AppHandle,
     mgr: State<'_, RunManager>,
     reg: State<'_, Arc<TransmissionRegistry>>,
+    gateway: State<'_, UiGateway>,
     run_id: String,
     text: String,
 ) -> Result<(), String> {
@@ -503,7 +516,7 @@ pub async fn add_goal(
         now,
     );
     wagner_edge_host::state::save(&runs_root, &run).map_err(|e| e.to_string())?;
-    resume_run(app, mgr, reg, run_id).await
+    resume_run(app, mgr, reg, gateway, run_id).await
 }
 
 /// The workflow templates for the builder's picker (decision #4): the built-in
@@ -631,6 +644,7 @@ pub async fn start_workflow(
     mgr: State<'_, RunManager>,
     reg: State<'_, Arc<TransmissionRegistry>>,
     store: State<'_, MemoryStore>,
+    gateway: State<'_, UiGateway>,
     mut workflow: Workflow,
     guardrails: GuardrailConfig,
     project_dir: String,
@@ -669,7 +683,8 @@ pub async fn start_workflow(
     // Claude operatives still need the US2 per-tool permission gate.
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
-        &app,
+        gateway.inner().clone(),
+        &run_id,
         &app_data,
         reg.inner().clone(),
         u64::from(guardrails.blocked_timeout_secs),
@@ -677,7 +692,7 @@ pub async fn start_workflow(
     )
     .await?;
 
-    let app_for_loop = app.clone();
+    let gateway_for_task = gateway.inner().clone();
     let gate_config = gate.config.clone();
     let reg_for_gate = reg.inner().clone();
     let cwd = project_cwd.clone();
@@ -687,19 +702,21 @@ pub async fn start_workflow(
     let task = tauri::async_runtime::spawn(async move {
         let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
 
-        // Stage-level human gate: open a transmission, emit it, await the answer.
-        let app_for_gate = app_for_loop.clone();
+        // Stage-level human gate: open a transmission, publish it, await the answer.
+        let gateway_for_gate = gateway_for_task.clone();
+        let run_id_for_gate = run_id_for_task.clone();
         let resolve_gate = move |node_id: &str, artifact: &str| -> futures::future::BoxFuture<'static, GateDecision> {
             let reg = reg_for_gate.clone();
-            let app = app_for_gate.clone();
+            let gateway = gateway_for_gate.clone();
+            let run_id = run_id_for_gate.clone();
             let node = node_id.to_string();
             let art = artifact.to_string();
             Box::pin(async move {
                 let id = ulid::Ulid::new().to_string();
                 let rx = reg.open(&id);
-                let _ = app.emit(
-                    "wagner://transmission",
-                    serde_json::json!({
+                gateway.publish_run(
+                    &run_id,
+                    Event::Run(RunEvent::Transmission(serde_json::json!({
                         "schema": "transmission.v1",
                         "id": id,
                         "subtask_id": node,
@@ -712,7 +729,7 @@ pub async fn start_workflow(
                         ],
                         "raised_at": chrono::Utc::now().to_rfc3339(),
                         "state": "open"
-                    }),
+                    }))),
                 );
                 match rx.await {
                     Ok(wagner_edge_host::transmissions::Decision::Allow) => GateDecision::Approve,
@@ -740,7 +757,7 @@ pub async fn start_workflow(
         };
 
         // Per-stage event → the builder highlights the active node + shows artifacts.
-        let app_for_step = app_for_loop.clone();
+        let gateway_for_step = gateway_for_task.clone();
         let run_id_for_step = run_id_for_task.clone();
         let on_step = move |s: &StepRecord| {
             let payload = serde_json::json!({
@@ -761,7 +778,7 @@ pub async fn start_workflow(
             ) {
                 eprintln!("[wagner-edge] workflow-step event failed schema validation: {e}");
             }
-            let _ = app_for_step.emit("wagner://workflow", payload);
+            gateway_for_step.publish_run(&run_id_for_step, Event::Run(RunEvent::WorkflowStep(payload)));
         };
 
         let result = run_workflow(
@@ -777,21 +794,19 @@ pub async fn start_workflow(
         .await;
 
         // Final snapshot: outcome + the full step log.
-        let _ = app_for_loop.emit(
-            "wagner://workflow-done",
-            serde_json::json!({
-                "run_id": run_id_for_task,
-                "end": format!("{:?}", result.as_ref().map(|r| &r.end)),
-                "cost": result.as_ref().map(|r| r.cost).unwrap_or(0.0),
-                "error": result.as_ref().err().map(|e| e.to_string()),
-                "steps": result.as_ref().ok().map(|r| {
-                    r.steps.iter().map(|s| serde_json::json!({
-                        "node_id": s.node_id, "kind": s.kind, "operative_id": s.operative_id,
-                        "success": s.success, "passed": s.passed, "fanout": s.fanout,
-                    })).collect::<Vec<_>>()
-                }),
+        let done = serde_json::json!({
+            "run_id": run_id_for_task.clone(),
+            "end": format!("{:?}", result.as_ref().map(|r| &r.end)),
+            "cost": result.as_ref().map(|r| r.cost).unwrap_or(0.0),
+            "error": result.as_ref().err().map(|e| e.to_string()),
+            "steps": result.as_ref().ok().map(|r| {
+                r.steps.iter().map(|s| serde_json::json!({
+                    "node_id": s.node_id, "kind": s.kind, "operative_id": s.operative_id,
+                    "success": s.success, "passed": s.passed, "fanout": s.fanout,
+                })).collect::<Vec<_>>()
             }),
-        );
+        });
+        gateway_for_task.publish_run(&run_id_for_task, Event::Run(RunEvent::WorkflowDone(done)));
     });
 
     // Register this run alongside any others (concurrent sessions) — keyed by id.
@@ -867,6 +882,7 @@ fn aborted(mut run: Run) -> Run {
 pub fn abort(
     app: AppHandle,
     mgr: State<'_, RunManager>,
+    gateway: State<'_, UiGateway>,
     run_id: Option<String>,
 ) -> Result<(), String> {
     let runs_root = app
@@ -886,7 +902,7 @@ pub fn abort(
         if let Ok(run) = wagner_edge_host::state::load(&runs_root, &id) {
             let run = aborted(run);
             let _ = wagner_edge_host::state::save(&runs_root, &run);
-            let _ = app.emit("wagner://run", run);
+            gateway.publish_run(&id, Event::Run(RunEvent::Snapshot(Box::new(run))));
         }
     }
     Ok(())
@@ -1036,7 +1052,10 @@ pub fn voice_models_status(app: AppHandle) -> Result<VoiceModelsDto, String> {
 ///   "total": u64 }
 /// ```
 #[tauri::command]
-pub async fn voice_download_models(app: AppHandle) -> Result<(), String> {
+pub async fn voice_download_models(
+    app: AppHandle,
+    gateway: State<'_, UiGateway>,
+) -> Result<(), String> {
     let dir = models_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create models dir: {e}"))?;
 
@@ -1048,9 +1067,12 @@ pub async fn voice_download_models(app: AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("could not build HTTP client: {e}"))?;
 
-    let app_for_emit = app.clone();
+    let gateway_for_emit = gateway.inner().clone();
     wagner_edge_host::voice::download_models(&dir, &client, move |progress| {
-        let _ = app_for_emit.emit("wagner://voice-download", &progress);
+        gateway_for_emit.publish_workspace(
+            "voice",
+            Event::Voice(VoiceEvent::DownloadProgress(Box::new(progress))),
+        );
     })
     .await
     .map_err(|e| e.to_string())

@@ -80,8 +80,14 @@ standalone, not wired (P2 routes the emit side through it).**
 `edge/shell/src/commands.rs` to `bus.publish(Event::…)`.
 **Tests:** golden test — bus→UiGateway→Tauri payload matches the old schema for each
 of the 7; the `?mock` reducer journey stays byte-compatible.
-**Acceptance:** [ ] `make accept` green (UI journey unchanged) [ ] all UI events now
+**Acceptance:** [x] `make accept` green (UI journey unchanged) [x] all UI events now
 originate from `bus.publish`. **Rollback:** revert the call-site swaps; `UiGateway` is additive.
+**✅ DONE — `edge/shell/src/bus_gateway.rs` (`UiGateway` + pure `project()` seam); 6 byte-compat
+golden tests cover all 7 channels. All 9 emit sites in `commands.rs`/`gate.rs` now `publish` typed
+events; the gateway task re-emits `wagner://*` identically. Leaf variants added to `RunEvent`
+(Snapshot/Activity/Transmission/WorkflowStep/WorkflowDone), `UiEvent::Panel`,
+`VoiceEvent::DownloadProgress` (schema-opaque during migration; P7 tightens). `make verify` +
+`make accept` green; abort still terminal.**
 
 ### Step 3 — Command intake (the one path in)
 **Why:** collapse ~26 ad-hoc Tauri handlers into one validated, authorized path — the
