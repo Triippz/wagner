@@ -3,8 +3,13 @@
 //! The public, serializable contract every bus participant authors against: the
 //! `Envelope`, the namespaced `Event`/`Command` taxonomy, participant identity +
 //! the `Agent` trait, the uniform `PluginManifest`, the closed `Capability`
-//! vocabulary, and `StabilityTier`. **Types only** — no bus loop, intake,
-//! registry, or participant behaviour (those are `011` P1+).
+//! vocabulary, and `StabilityTier`.
+//!
+//! The contract submodules (`envelope`/`event`/`command`/`participant`/`manifest`)
+//! are **pure data**. The one behavioural piece is [`runtime`] — the in-process
+//! [`Bus`] (spec `011` P1): a `tokio::broadcast` fan-out that stamps per-stream
+//! `seq` and surfaces slow-subscriber lag. Command-intake (`dispatch`) and the
+//! registry are still later plan steps (`011` P3/P4).
 //!
 //! ## Invariants
 //! - **Namespaced.** `Event`/`Command` are adjacently-tagged (`{type, data}`)
@@ -34,12 +39,14 @@ mod envelope;
 mod event;
 mod manifest;
 mod participant;
+mod runtime;
 
 pub use command::{Command, GoalCommand, RunCommand, UiCommand, VaultCommand, VoiceCommand};
 pub use envelope::{Envelope, EventId, Scope, StreamId, Timestamp};
 pub use event::{Event, GoalEvent, RunEvent, UiEvent, VaultEvent, VoiceEvent};
 pub use manifest::{Capability, Namespace, PluginManifest, SchemaRef, StabilityTier};
 pub use participant::{Agent, AgentError, NodeId, ParticipantId, ParticipantKind, Subscription};
+pub use runtime::{Bus, RecvError, Subscriber};
 
 /// Per-type contract metadata: the schema-version id (FR-016) and the stability
 /// tier (FR-010). Implemented by the top-level contract types that get an

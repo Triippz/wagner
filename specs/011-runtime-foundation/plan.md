@@ -55,8 +55,9 @@ churn it mid-build.
 - Export JSON Schemas to `edge/host/schemas/` (Article X) per payload.
 **Tests:** serde round-trip per variant; schema accept/reject; a guard that no
 `Event`/`Command` carries a non-serializable handle (the §7 seam).
-**Acceptance:** [ ] types compile [ ] schemas generated [ ] round-trip + schema tests
-pass [ ] `make verify` green (nothing wired yet).
+**Acceptance:** [x] types compile [x] schemas generated [x] round-trip + schema tests
+pass [x] `make verify` green (nothing wired yet). **✅ DONE — delivered by `specs/013`
+(commit `1dc9bfd`); 14 contract tests + TS bindings.**
 
 ### Step 1 — The in-process bus
 **Why:** the spine. Build and test it standalone before anything depends on its behavior.
@@ -65,7 +66,11 @@ pass [ ] `make verify` green (nothing wired yet).
 per-stream `seq`; explicit `Lagged`/overflow handling.
 **Tests:** publish→subscribe delivery; per-stream ordering; slow-subscriber `Lagged`
 path; bounded-queue overflow behavior; many concurrent publishers/subscribers.
-**Acceptance:** [ ] bus unit tests pass [ ] not yet wired → `make verify` green.
+**Acceptance:** [x] bus unit tests pass [x] not yet wired → `make verify` green.
+**✅ DONE — `edge/host/src/bus/runtime.rs` (`Bus`/`Subscriber`/`RecvError`); 6 tests:
+publish→subscribe delivery, per-stream seq (monotonic + independent), namespace +
+stream filtering, slow-subscriber Lagged + recovery, many concurrent pub/sub. Built
+standalone, not wired (P2 routes the emit side through it).**
 
 ### Step 2 — Route the emit side through the bus (UI unchanged)
 **Why:** prove the bus carries real traffic with zero UI risk. The React tree + the

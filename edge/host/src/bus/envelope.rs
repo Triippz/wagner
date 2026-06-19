@@ -18,7 +18,7 @@ pub struct Timestamp(pub String);
 
 /// The ordering scope of an event (FR-005). `Run` is the common case; new kinds
 /// are added additively.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StreamId {
     Run(String),

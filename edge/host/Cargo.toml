@@ -177,3 +177,8 @@ path = "tests/unit/bus_no_handle_guard.rs"
 [[test]]
 name = "bus_additive_version"
 path = "tests/unit/bus_additive_version.rs"
+
+# 011 P1 — in-process bus runtime (publish/subscribe, per-stream seq, Lagged).
+[[test]]
+name = "bus_runtime"
+path = "tests/unit/bus_runtime.rs"
