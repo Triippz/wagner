@@ -11,6 +11,7 @@
     "./run-reducer": "./reducer/run-reducer.ts",
     "./run-events": "./reducer/run-events.ts",
     "./transport": "./transport/index.ts",
+    "./transport/resync": "./transport/resync.ts",
     "./schemas/*": "./schemas/*"
   },
   "scripts": {

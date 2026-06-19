@@ -170,6 +170,13 @@ locked mock surfaces; implement snapshot hydration + resync-on-gap.
 gap → resync from `get_initial_state`/`get_run_state`.
 **Acceptance:** [ ] `make accept` green on the new stream [ ] the six surfaces render
 from real events.
+**◑ PARTIAL — resync-on-gap done (`shared/transport/resync.ts`: per-stream cursor over the typed
+seq; in-order/duplicate/gap decision + `resyncTo`; 5 tests). The UI already runs on the bus
+indirectly: P2's `UiGateway` re-emits the legacy `wagner://*` channels byte-identically, so the
+`?mock` journey + `make accept` stay green unchanged. BLOCKED: pointing `edge/ui` at the typed
+stream + porting the six surfaces + UI `dispatch(Command)` wait on the re-mocked surfaces being
+exported to the repo — the operator's explicit "UI wiring last." When the mocks land: swap the
+reducer to fold typed `Event`s (contracts already generated), wire `dispatch`, adopt `resync`.**
 
 ## Verification (whole plan done)
 
