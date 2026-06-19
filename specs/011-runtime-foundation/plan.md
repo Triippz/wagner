@@ -135,7 +135,14 @@ cap + worktree isolation). Bound the stdout channel in `cli/driver.rs` (`mpsc::c
 **Tests:** a goal with N independent subtasks runs them concurrently (assert overlap),
 capped at the limit; high-output subprocess applies backpressure, doesn't OOM; UI stays
 responsive.
-**Acceptance:** [ ] concurrency + backpressure tests pass [ ] `make verify` green.
+**Acceptance:** [x] concurrency + backpressure tests pass [x] `make verify` green.
+**✅ DONE — `scheduler::non_overlapping_waves` (overlapping writers serialized into sequential
+waves; disjoint + read-only run together) + `scheduler::run_bounded` (concurrent, capped via
+`default_concurrency`). `run_goal`'s sequential subtask loop replaced with wave-by-wave bounded
+dispatch (deterministic plan-order fold preserved → goal-loop tests unchanged). `cli/driver.rs`
+stdout channel: unbounded → bounded(4096) `send().await` → backpressure, bounded memory. Tests:
+overlap-serialization, capped-concurrency-with-overlap (deterministic, explicit cap). Full
+worktree isolation of overlapping writers is the additive upgrade.**
 
 ### Step 6 — Scheduler participant + first connector
 **Why:** proves "new agent = new integration = same move," and unblocks Workflows (the
