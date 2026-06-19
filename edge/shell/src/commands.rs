@@ -381,7 +381,6 @@ pub async fn start_run(
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
         gateway.inner().clone(),
-        &run_id,
         &app_data,
         reg.inner().clone(),
         u64::from(run.guardrails.blocked_timeout_secs),
@@ -444,7 +443,6 @@ pub async fn resume_run(
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
         gateway.inner().clone(),
-        &run_id,
         &app_data,
         reg.inner().clone(),
         u64::from(run.guardrails.blocked_timeout_secs),
@@ -684,7 +682,6 @@ pub async fn start_workflow(
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
         gateway.inner().clone(),
-        &run_id,
         &app_data,
         reg.inner().clone(),
         u64::from(guardrails.blocked_timeout_secs),
@@ -704,19 +701,19 @@ pub async fn start_workflow(
 
         // Stage-level human gate: open a transmission, publish it, await the answer.
         let gateway_for_gate = gateway_for_task.clone();
-        let run_id_for_gate = run_id_for_task.clone();
         let resolve_gate = move |node_id: &str, artifact: &str| -> futures::future::BoxFuture<'static, GateDecision> {
             let reg = reg_for_gate.clone();
             let gateway = gateway_for_gate.clone();
-            let run_id = run_id_for_gate.clone();
             let node = node_id.to_string();
             let art = artifact.to_string();
             Box::pin(async move {
                 let id = ulid::Ulid::new().to_string();
                 let rx = reg.open(&id);
-                gateway.publish_run(
-                    &run_id,
-                    Event::Run(RunEvent::Transmission(serde_json::json!({
+                // Human gate: deliver synchronously + reliably (emit_now), not via
+                // the bus fan-out — the workflow is blocked on the engineer's answer.
+                gateway.emit_now(
+                    "wagner://transmission",
+                    &serde_json::json!({
                         "schema": "transmission.v1",
                         "id": id,
                         "subtask_id": node,
@@ -729,7 +726,7 @@ pub async fn start_workflow(
                         ],
                         "raised_at": chrono::Utc::now().to_rfc3339(),
                         "state": "open"
-                    }))),
+                    }),
                 );
                 match rx.await {
                     Ok(wagner_edge_host::transmissions::Decision::Allow) => GateDecision::Approve,

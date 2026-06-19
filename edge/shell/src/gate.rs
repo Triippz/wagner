@@ -7,7 +7,6 @@
 //! module is the thin Tauri shell glue that wires them together.
 
 use crate::bus_gateway::UiGateway;
-use wagner_edge_host::bus::{Event, RunEvent};
 use wagner_edge_host::transmissions::TransmissionRegistry;
 use serde_json::Value;
 use std::sync::Arc;
@@ -30,7 +29,6 @@ pub struct StartedGate {
 /// transport + policy, rather than in the Tauri command module.
 pub async fn start_gate_server(
     gateway: UiGateway,
-    run_id: &str,
     app_data: &std::path::Path,
     reg: Arc<TransmissionRegistry>,
     blocked_timeout_secs: u64,
@@ -68,15 +66,16 @@ pub async fn start_gate_server(
     };
 
     let gateway_for_emit = gateway;
-    let run_id = run_id.to_string();
     let handler = move |args: Value| {
         let reg = reg.clone();
         let gateway = gateway_for_emit.clone();
-        let run_id = run_id.clone();
         let blocked_halt = blocked_halt.clone();
         async move {
+            // The permission prompt is human-in-the-loop control flow: deliver it
+            // synchronously and reliably (emit_now), not through the bus fan-out
+            // where a burst could drop or delay it while the run is blocked.
             let emit = move |tj: Value| {
-                gateway.publish_run(&run_id, Event::Run(RunEvent::Transmission(tj)));
+                gateway.emit_now("wagner://transmission", &tj);
             };
             let on_timeout = move || blocked_halt.store(true, Ordering::SeqCst);
             let raised_at = chrono::Utc::now().to_rfc3339();

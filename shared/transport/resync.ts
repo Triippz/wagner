@@ -47,8 +47,12 @@ export function observe(cursor: StreamCursor, envelope: Envelope): GapDecision {
 
 /**
  * After rehydrating a stream from a snapshot taken at `seq`, reset the cursor so
- * subsequent envelopes fold in order from there.
+ * subsequent envelopes fold in order from there. Never rewinds: passing a `seq`
+ * below the current cursor (e.g. the gap's `from` instead of the snapshot seq) is
+ * clamped, so already-folded envelopes are not replayed as new.
  */
 export function resyncTo(cursor: StreamCursor, stream: StreamId, seq: number): void {
-  cursor[streamKey(stream)] = seq;
+  const key = streamKey(stream);
+  const current = key in cursor ? cursor[key] : -1;
+  cursor[key] = Math.max(current, seq);
 }

@@ -83,7 +83,7 @@ pub fn run() {
             // any run can publish.
             let bus = Arc::new(wagner_edge_host::bus::Bus::new(1024));
             bus_gateway::spawn(bus.clone(), app.handle().clone());
-            app.manage(bus_gateway::UiGateway::new(bus));
+            app.manage(bus_gateway::UiGateway::new(bus, app.handle().clone()));
 
             // System tray — the visible anchor when the window is hidden. Built
             // here (not in tauri.conf) so its handlers can flip the Dock icon with

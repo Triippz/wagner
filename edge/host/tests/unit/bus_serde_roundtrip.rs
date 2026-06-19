@@ -91,3 +91,38 @@ fn envelope_round_trips_carrying_each_namespace() {
         round_trip(&envelope_around(event));
     }
 }
+
+// 011 P2 — the variants that carry the real UI payloads (`Snapshot`/`Activity`/
+// `DownloadProgress`) are schema-opaque but MUST still serde-round-trip exactly,
+// or the `wagner://run|event|voice-download` byte-compat contract breaks. This
+// guards against a serde-attribute change to Run/WagnerEvent/ModelProgress that
+// the opaque schema would otherwise hide.
+#[test]
+fn opaque_payload_variants_round_trip() {
+    use wagner_edge_host::events::{Activity, District, Faction, OperativeState, WagnerEvent};
+    use wagner_edge_host::state::Run;
+    use wagner_edge_host::voice::{ModelProgress, ModelState};
+
+    let run = Run::new("r1".into(), "ship it".into(), vec!["d.md".into()], "2026-06-19T00:00:00Z".into());
+    round_trip(&Event::Run(RunEvent::Snapshot(Box::new(run.clone()))));
+    round_trip(&envelope_around(Event::Run(RunEvent::Snapshot(Box::new(run)))));
+
+    let activity = WagnerEvent {
+        schema: "wagner-event.v1".into(),
+        event_id: "01J0000000000000000000000A".into(),
+        run_id: "01J0000000000000000000000B".into(),
+        operative_id: "cipher".into(),
+        operative_name: "Cipher".into(),
+        faction: Faction::Architects,
+        activity: Activity::Edit,
+        district: District::Stacks,
+        state: OperativeState::Working,
+        message: Some("editing".into()),
+        handoff_target_operative_id: None,
+        ts: "2026-06-19T00:00:00Z".into(),
+    };
+    round_trip(&Event::Run(RunEvent::Activity(Box::new(activity))));
+
+    let progress = ModelProgress { model: "stt".into(), state: ModelState::Downloading, received: 5, total: 10 };
+    round_trip(&Event::Voice(VoiceEvent::DownloadProgress(Box::new(progress))));
+}

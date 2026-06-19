@@ -89,7 +89,14 @@ impl AgentRegistry {
     /// `name()`; spawning a name that is already live replaces the prior handle.
     pub fn spawn(&self, mut agent: Box<dyn Agent>) {
         let name = agent.name().to_string();
+        // Subscribe before anything else so no event is missed in the handoff gap.
         let mut subscriber = self.bus.subscribe_many(agent.subscriptions());
+        // Cancel any prior agent of this name BEFORE starting the new task, so two
+        // instances of one name are never live simultaneously.
+        if let Some(prev) = self.running.lock().expect("registry not poisoned").remove(&name) {
+            prev.abort();
+        }
+        let agent_name = name.clone();
         let handle = tokio::spawn(async move {
             if agent.init().await.is_err() {
                 return;
@@ -101,15 +108,19 @@ impl AgentRegistry {
                         // retry/recovery); one failed handle never stops the bus.
                         let _ = agent.handle(&envelope).await;
                     }
-                    Err(RecvError::Lagged(_)) => continue,
+                    // Lagged means this agent fell behind the fan-out buffer and
+                    // missed `n` events; log so the gap is visible (an at-least-once
+                    // agent rehydrates from a snapshot — see resync, 011 P7).
+                    Err(RecvError::Lagged(n)) => {
+                        eprintln!("[wagner] agent '{agent_name}' lagged: {n} event(s) dropped");
+                        continue;
+                    }
                     Err(RecvError::Closed) => break,
                 }
             }
             let _ = agent.shutdown().await;
         });
-        if let Some(prev) = self.running.lock().expect("registry not poisoned").insert(name, handle) {
-            prev.abort();
-        }
+        self.running.lock().expect("registry not poisoned").insert(name, handle);
     }
 
     /// Stop a participant by name (cancels its task). `true` if one was running.

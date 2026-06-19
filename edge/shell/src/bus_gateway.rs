@@ -46,11 +46,21 @@ fn envelope(stream: StreamId, payload: Event) -> Envelope {
 #[derive(Clone)]
 pub struct UiGateway {
     bus: Arc<Bus>,
+    app: AppHandle,
 }
 
 impl UiGateway {
-    pub fn new(bus: Arc<Bus>) -> Self {
-        Self { bus }
+    pub fn new(bus: Arc<Bus>, app: AppHandle) -> Self {
+        Self { bus, app }
+    }
+
+    /// Emit a control event to its Tauri channel **synchronously**, bypassing the
+    /// bus fan-out. Reserved for latency- and delivery-critical human-in-the-loop
+    /// events — the permission/workflow gate transmission — which must reach the
+    /// UI immediately and must never be dropped by broadcast lag (the run is
+    /// blocked on the operator's answer; a dropped prompt would hang it).
+    pub fn emit_now<S: serde::Serialize + Clone>(&self, channel: &str, payload: &S) {
+        let _ = self.app.emit(channel, payload.clone());
     }
 
     /// Publish a typed event on a run-scoped stream.
@@ -117,7 +127,13 @@ pub fn spawn(bus: Arc<Bus>, app: AppHandle) {
                         let _ = app.emit(channel, payload);
                     }
                 }
-                Err(RecvError::Lagged(_)) => continue,
+                // Observational events only reach the bus (control events use
+                // emit_now); a dropped Activity/Snapshot is self-correcting — the
+                // next Snapshot carries full state. Log so the gap is visible.
+                Err(RecvError::Lagged(n)) => {
+                    eprintln!("[wagner-edge] UiGateway lagged: {n} envelope(s) dropped");
+                    continue;
+                }
                 Err(RecvError::Closed) => break,
             }
         }
