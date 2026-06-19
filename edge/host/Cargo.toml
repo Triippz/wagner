@@ -187,3 +187,8 @@ path = "tests/unit/bus_runtime.rs"
 [[test]]
 name = "bus_dispatch"
 path = "tests/unit/bus_dispatch.rs"
+
+# 011 P4 — agent registry (spawn/supervise/stop, subscription routing, context).
+[[test]]
+name = "bus_registry"
+path = "tests/unit/bus_registry.rs"

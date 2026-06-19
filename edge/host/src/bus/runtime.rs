@@ -113,7 +113,14 @@ impl Bus {
     /// Subscribe with a topic/namespace filter. The returned [`Subscriber`] only
     /// sees envelopes from publishes made *after* this call (broadcast semantics).
     pub fn subscribe(&self, subscription: Subscription) -> Subscriber {
-        Subscriber { rx: self.tx.subscribe(), subscription }
+        Subscriber { rx: self.tx.subscribe(), subscriptions: vec![subscription] }
+    }
+
+    /// Subscribe with several filters at once (a participant declares many). The
+    /// subscriber delivers an envelope matching *any* of `subscriptions` (011 P4:
+    /// the registry subscribes each agent with its full subscription set).
+    pub fn subscribe_many(&self, subscriptions: Vec<Subscription>) -> Subscriber {
+        Subscriber { rx: self.tx.subscribe(), subscriptions }
     }
 
     /// Number of live subscribers (test/observability aid).
@@ -127,7 +134,7 @@ impl Bus {
 /// slow consumer, after which `recv` resumes from the oldest retained envelope.
 pub struct Subscriber {
     rx: broadcast::Receiver<Envelope>,
-    subscription: Subscription,
+    subscriptions: Vec<Subscription>,
 }
 
 impl Subscriber {
@@ -137,10 +144,29 @@ impl Subscriber {
     pub async fn recv(&mut self) -> Result<Envelope, RecvError> {
         loop {
             match self.rx.recv().await {
-                Ok(envelope) if matches(&self.subscription, &envelope) => return Ok(envelope),
-                Ok(_) => continue, // delivered to the bus, filtered out for this subscription
+                Ok(envelope) if self.subscriptions.iter().any(|s| matches(s, &envelope)) => {
+                    return Ok(envelope)
+                }
+                Ok(_) => continue, // delivered to the bus, filtered out for these subscriptions
                 Err(broadcast::error::RecvError::Lagged(n)) => return Err(RecvError::Lagged(n)),
                 Err(broadcast::error::RecvError::Closed) => return Err(RecvError::Closed),
+            }
+        }
+    }
+
+    /// Non-blocking: the next matching buffered envelope, or `None` when the
+    /// buffer holds no (more) matching envelopes right now. Skips filtered and
+    /// lagged-over envelopes. Useful for draining already-published facts.
+    pub fn try_recv(&mut self) -> Option<Envelope> {
+        loop {
+            match self.rx.try_recv() {
+                Ok(envelope) if self.subscriptions.iter().any(|s| matches(s, &envelope)) => {
+                    return Some(envelope)
+                }
+                Ok(_) => continue,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Empty)
+                | Err(broadcast::error::TryRecvError::Closed) => return None,
             }
         }
     }

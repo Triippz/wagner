@@ -40,6 +40,7 @@ mod envelope;
 mod event;
 mod manifest;
 mod participant;
+mod registry;
 mod runtime;
 
 pub use command::{Command, GoalCommand, RunCommand, UiCommand, VaultCommand, VoiceCommand};
@@ -48,6 +49,7 @@ pub use envelope::{Envelope, EventId, Scope, StreamId, Timestamp};
 pub use event::{Event, GoalEvent, RunEvent, UiEvent, VaultEvent, VoiceEvent};
 pub use manifest::{Capability, Namespace, PluginManifest, SchemaRef, StabilityTier};
 pub use participant::{Agent, AgentError, NodeId, ParticipantId, ParticipantKind, Subscription};
+pub use registry::{AgentContext, AgentRegistry};
 pub use runtime::{Bus, RecvError, Subscriber};
 
 /// Per-type contract metadata: the schema-version id (FR-016) and the stability

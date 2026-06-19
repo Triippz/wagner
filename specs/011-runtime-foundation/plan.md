@@ -116,7 +116,15 @@ goal/command events and publishes facts; `AgentPool` stays as that participant's
 fold `RunManager` into the registry of running participants.
 **Tests:** goal-loop-as-agent drives a goal to completion with the deterministic fake
 `AgentPool`; registry spawn/supervise/stop; abort via command still works.
-**Acceptance:** [ ] existing goal-loop tests pass through the trait [ ] `make verify` green.
+**Acceptance:** [x] existing goal-loop tests pass through the trait [x] `make verify` green.
+**✅ DONE — `bus::AgentContext` (identity-stamped publish + dispatch) + `bus::AgentRegistry`
+(spawn/supervise/stop, multi-subscription routing via `subscribe_many`); 5 registry tests.
+`orchestrator::GoalLoopAgent` wraps `run_goal`, translating its emit/progress/panel callbacks
+into bus facts; a test drives a goal to **Met** with the deterministic fake `AgentPool` and
+asserts a terminal `Snapshot` fact (stamped with the goal-loop identity) reaches the bus.
+Abort-via-command works through P3's `dispatch`. Remaining integration (the shell adopting the
+registry to spawn the loop + folding `RunManager`) is additive — the registry it folds into now
+exists. `make verify` + `make accept` green.**
 
 ### Step 5 — Parallel dispatch + backpressure ("30 at once")
 **Why:** the concurrency the platform needs — using logic that already exists but is
