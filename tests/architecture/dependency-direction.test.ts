@@ -131,4 +131,17 @@ describe("Article VII — dependency direction", () => {
 
     expect(violations, `external code must not import platform/:\n${violations.join("\n")}`).toEqual([]);
   });
+
+  it("generated bus contracts (shared/contracts) are pure type bindings — no imports (013 T019, Gate VII)", () => {
+    // The Rust→TS contract bindings (json2ts output) must be self-contained pure
+    // type declarations: json2ts inlines every $ref, so a generated `.d.ts` that
+    // carries ANY import means the contract leaked a dependency into shared/.
+    const contractsDir = join(PLATFORM_ROOT, "shared", "contracts");
+    const generated = collectSources(contractsDir).filter((f) => f.endsWith(".d.ts"));
+    expect(generated.length, "expected generated .d.ts bindings under shared/contracts").toBeGreaterThan(0);
+    const withImports = generated
+      .filter((file) => importSpecifiers(file).length > 0)
+      .map((file) => relative(PLATFORM_ROOT, file));
+    expect(withImports, "generated contract bindings must be pure type declarations").toEqual([]);
+  });
 });

@@ -27,3 +27,6 @@ edge/shell/binaries/
 .claude/worktrees/
 # Logs
 *.log
+
+# CodeGraph local index (tooling)
+.codegraph/

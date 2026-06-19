@@ -26,9 +26,15 @@ pub enum DriverError {
 pub struct Driver {
     child: Child,
     stdin: Option<ChildStdin>,
-    /// Receives one `CliSignal` per stdout line (already mapped).
-    pub signals: mpsc::UnboundedReceiver<CliSignal>,
+    /// Receives one `CliSignal` per stdout line (already mapped). Bounded so a
+    /// high-output subprocess applies backpressure on the stdout pump instead of
+    /// growing an unbounded queue (011 P5).
+    pub signals: mpsc::Receiver<CliSignal>,
 }
+
+/// Stdout-pump buffer: how many mapped signals may queue before a fast subprocess
+/// is back-pressured (the pump `await`s the slow consumer). Bounds memory.
+const STDOUT_CHANNEL_CAP: usize = 4096;
 
 impl Driver {
     /// Spawn `program args...` in `cwd`, mapping each stdout line with `mapper`.
@@ -55,7 +61,7 @@ impl Driver {
 
         let stdout = child.stdout.take().ok_or(DriverError::NoPipe)?;
         let stdin = child.stdin.take();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(STDOUT_CHANNEL_CAP);
 
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -66,7 +72,9 @@ impl Driver {
                             continue;
                         }
                         // A closed receiver means the run was aborted; stop pumping.
-                        if tx.send(mapper(&line)).is_err() {
+                        // `send().await` back-pressures the pump when the consumer
+                        // lags, bounding memory (011 P5).
+                        if tx.send(mapper(&line)).await.is_err() {
                             break;
                         }
                     }

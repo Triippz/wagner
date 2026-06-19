@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ext.slack.message.v1",
+  "description": "Registered payload schema for the Ext fact { ns: \"slack\", name: \"message\", version: 1 }. A representative extension schema proving the Ext seam (FR-009); third-party schemas land via a load-time registry later (FR-019).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["channel", "text"],
+  "properties": {
+    "channel": { "type": "string" },
+    "text": { "type": "string", "maxLength": 4000 }
+  }
+}

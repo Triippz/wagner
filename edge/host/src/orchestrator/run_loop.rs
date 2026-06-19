@@ -9,7 +9,7 @@
 //!
 //! Orchestrates over `EngineRunner` so it is fully testable with scripted engines.
 
-use super::engine::{EngineRunner, Role};
+use super::engine::{EngineOutcome, EngineRunner, Role};
 use super::guardrails::{self, Verdict};
 use super::judge::{self, GoalVerdict, JudgeInputs, SuiteResult};
 use super::oracle;
@@ -257,16 +257,47 @@ pub async fn run_goal(mut run: Run, deps: LoopDeps<'_>) -> Run {
         // This iteration's subtasks form a fresh batch; the next goal-met check
         // converges over them, not over superseded earlier-iteration subtasks (M5).
         last_batch_start = run.subtasks.len();
+        // Dispatch the planned subtasks with bounded concurrency ("30 at once"):
+        // disjoint + read-only subtasks run concurrently up to the scheduler cap;
+        // subtasks whose declared write-paths overlap are serialized into separate
+        // waves so they never clobber each other (R-ISOLATION).
+        // ponytail: overlapping writers serialize; running them concurrently in
+        // isolated git worktrees (Subtask.worktree) is the upgrade for throughput.
+        let cap = super::scheduler::default_concurrency(
+            std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2),
+        );
+        let write_paths: Vec<Vec<String>> =
+            plan.subtasks.iter().map(|s| s.may_write_paths.clone()).collect();
+        let mut outcomes: Vec<Option<EngineOutcome>> =
+            (0..plan.subtasks.len()).map(|_| None).collect();
+        for wave in super::scheduler::non_overlapping_waves(&write_paths) {
+            let tasks: Vec<futures::future::BoxFuture<'_, (usize, EngineOutcome)>> = wave
+                .into_iter()
+                .filter_map(|i| {
+                    // parse_plan guaranteed the agent is in the roster; skip
+                    // defensively if not.
+                    let planned = &plan.subtasks[i];
+                    deps.pool.runner(&planned.agent).map(|runner| {
+                        let desc = planned.description.as_str();
+                        Box::pin(async move { (i, runner.run(Role::Execute, desc).await) })
+                            as futures::future::BoxFuture<'_, (usize, EngineOutcome)>
+                    })
+                })
+                .collect();
+            for (i, outcome) in super::scheduler::run_bounded(cap, tasks).await {
+                outcomes[i] = Some(outcome);
+            }
+        }
+        // Fold results in plan order — deterministic event + subtask order,
+        // unchanged from the sequential version (only execution is concurrent).
         for (i, planned) in plan.subtasks.iter().enumerate() {
+            let Some(outcome) = outcomes[i].take() else {
+                continue;
+            };
             let id = format!("{}-{}-{}", run.run_id, run.iteration, i);
             let agent_id = &planned.agent;
             let faction = deps.pool.faction(agent_id);
             let agent_name = deps.pool.name(agent_id);
-            // parse_plan guaranteed the agent is in the roster; skip defensively if not.
-            let Some(runner) = deps.pool.runner(agent_id) else {
-                continue;
-            };
-            let outcome = runner.run(Role::Execute, &planned.description).await;
             run.guardrails.cost.used += outcome.cost;
             emit_outcome(
                 &deps,

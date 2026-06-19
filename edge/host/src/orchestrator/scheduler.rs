@@ -45,6 +45,37 @@ pub fn isolation_required(wave: &[Vec<String>]) -> Vec<usize> {
     required
 }
 
+/// Partition subtasks (by their declared write-path sets) into waves such that
+/// within a wave no two subtasks' write-paths overlap (011 P5). Waves run
+/// sequentially; the members of each wave run concurrently (up to the cap) with
+/// no file-clobber risk. Read-only / empty-path subtasks overlap nothing, so they
+/// pack into the earliest wave with room. Greedy, order-preserving.
+pub fn non_overlapping_waves(write_paths: &[Vec<String>]) -> Vec<Vec<usize>> {
+    let mut waves: Vec<Vec<usize>> = Vec::new();
+    'next: for (i, paths_i) in write_paths.iter().enumerate() {
+        for wave in waves.iter_mut() {
+            if !wave.iter().any(|&j| paths_overlap(paths_i, &write_paths[j])) {
+                wave.push(i);
+                continue 'next;
+            }
+        }
+        waves.push(vec![i]);
+    }
+    waves
+}
+
+/// Run `tasks` concurrently, at most `cap` in flight at once, collecting every
+/// result (in completion order). The concurrency primitive behind parallel
+/// subtask dispatch (011 P5): polling-based concurrency, no extra task spawns, so
+/// the futures need not be `'static`.
+pub async fn run_bounded<'a, T>(
+    cap: usize,
+    tasks: Vec<futures::future::BoxFuture<'a, T>>,
+) -> Vec<T> {
+    use futures::stream::StreamExt;
+    futures::stream::iter(tasks).buffer_unordered(cap.max(1)).collect().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +124,54 @@ mod tests {
     fn read_only_never_isolated() {
         let wave = vec![vec![], vec![]];
         assert!(isolation_required(&wave).is_empty());
+    }
+
+    #[test]
+    fn disjoint_and_readonly_subtasks_share_one_wave() {
+        let paths = vec![vec!["a".to_string()], vec!["b".to_string()], vec![]];
+        assert_eq!(non_overlapping_waves(&paths), vec![vec![0, 1, 2]]);
+    }
+
+    #[test]
+    fn overlapping_writers_split_into_sequential_waves() {
+        // 0 & 2 both write "a" → must be in different waves; 1 is disjoint.
+        let paths = vec![
+            vec!["a".to_string()],
+            vec!["b".to_string()],
+            vec!["a".to_string()],
+        ];
+        let waves = non_overlapping_waves(&paths);
+        assert_eq!(waves, vec![vec![0, 1], vec![2]]);
+    }
+
+    #[tokio::test]
+    async fn run_bounded_overlaps_but_caps_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+        let cap = 3;
+
+        let tasks: Vec<futures::future::BoxFuture<'static, ()>> = (0..6)
+            .map(|_| {
+                let active = active.clone();
+                let max_seen = max_seen.clone();
+                Box::pin(async move {
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_seen.fetch_max(now, Ordering::SeqCst);
+                    // Hold the slot briefly so peers overlap in wall-clock time.
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                }) as futures::future::BoxFuture<'static, ()>
+            })
+            .collect();
+
+        let results = run_bounded(cap, tasks).await;
+        assert_eq!(results.len(), 6, "every task completes");
+        let peak = max_seen.load(Ordering::SeqCst);
+        assert!(peak > 1, "tasks ran concurrently (peak {peak})");
+        assert!(peak <= cap, "concurrency never exceeded the cap (peak {peak})");
     }
 }

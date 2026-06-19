@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Command",
+  "description": "A namespaced, imperative intent. Adjacently tagged as\n`{ \"type\": <namespace>, \"data\": <leaf> }`, mirroring [`super::Event`]; leaf\nvariants land additively inside each namespace enum (FR-007).",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "run"
+        },
+        "data": {
+          "$ref": "#/$defs/RunCommand"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "goal"
+        },
+        "data": {
+          "$ref": "#/$defs/GoalCommand"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "vault"
+        },
+        "data": {
+          "$ref": "#/$defs/VaultCommand"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "voice"
+        },
+        "data": {
+          "$ref": "#/$defs/VoiceCommand"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ui"
+        },
+        "data": {
+          "$ref": "#/$defs/UiCommand"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "Extension intent in a plugin-owned namespace; `payload` validates against\nthe schema registered for `{ns, name, version}` (FR-009).",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ext"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "ns": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "payload": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "ns",
+            "name",
+            "version",
+            "payload"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "RunCommand": {
+      "description": "Run-namespace intents.",
+      "oneOf": [
+        {
+          "description": "`run.start` — begin a run for a goal.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "start"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "goal": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "goal"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`run.abort` — terminate a run (`None` = every live run; the single-session\nUI sends no id). Migrated through `dispatch` in 011 P3.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "abort"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`run.steer` — inject a live steering instruction into a running session.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "steer"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "run_id",
+                "text"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "GoalCommand": {
+      "description": "Goal-namespace intents.",
+      "oneOf": [
+        {
+          "description": "`goal.add` — add a goal to the backlog.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "add"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "title"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "VaultCommand": {
+      "description": "Vault-namespace intents.",
+      "oneOf": [
+        {
+          "description": "`vault.update_note` — write new contents to a note.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "update_note"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "body"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "VoiceCommand": {
+      "description": "Voice-namespace intents.",
+      "oneOf": [
+        {
+          "description": "`voice.speak` — synthesize speech for text.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "speak"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "text"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UiCommand": {
+      "description": "UI-namespace intents.",
+      "oneOf": [
+        {
+          "description": "`ui.focus_surface` — move focus to a workspace surface.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "focus_surface"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "surface": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "surface"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

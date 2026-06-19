@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Event",
+  "description": "A namespaced, past-tense fact carried by the bus. Adjacently tagged as\n`{ \"type\": <namespace>, \"data\": <leaf> }`. The namespace set is the **stable\nstructure**; leaf variants land additively inside each namespace enum without\nediting this core (FR-006).",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "run"
+        },
+        "data": {
+          "$ref": "#/$defs/RunEvent"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "goal"
+        },
+        "data": {
+          "$ref": "#/$defs/GoalEvent"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "vault"
+        },
+        "data": {
+          "$ref": "#/$defs/VaultEvent"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "voice"
+        },
+        "data": {
+          "$ref": "#/$defs/VoiceEvent"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ui"
+        },
+        "data": {
+          "$ref": "#/$defs/UiEvent"
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "Extension fact in a plugin-owned namespace; `payload` validates against\nthe schema registered for `{ns, name, version}` (FR-009).",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ext"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "ns": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "payload": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "ns",
+            "name",
+            "version",
+            "payload"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "RunEvent": {
+      "description": "Run-namespace facts. The migrated `wagner://*` run-execution channels land\nhere (P2): the bus carries the real payloads so the `UiGateway` can re-emit\nthe legacy Tauri events byte-identically.",
+      "oneOf": [
+        {
+          "description": "`run.finished` — a run reached a terminal state (seed; `Snapshot` carries\nthe full live + terminal state for the UI).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "finished"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "run_id",
+                "ok"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://run` — full run-state snapshot (live progress + terminal).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "snapshot"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://event` — operative floor activity during a run.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "activity"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://transmission` — a gate/permission prompt awaiting a human answer.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "transmission"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://workflow` — a workflow step record.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "workflow_step"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://workflow-done` — terminal workflow summary.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "workflow_done"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "GoalEvent": {
+      "description": "Goal-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`goal.added` — a goal entered the backlog.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "added"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "goal_id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "goal_id",
+                "title"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "VaultEvent": {
+      "description": "Vault-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`vault.note_updated` — a note's contents changed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "note_updated"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "rev": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "rev"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "VoiceEvent": {
+      "description": "Voice-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`voice.utterance_transcribed` — STT produced text for an utterance.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "utterance_transcribed"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "text"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://voice-download` — model download progress.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "download_progress"
+            },
+            "data": true
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UiEvent": {
+      "description": "UI-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`ui.surface_focused` — a workspace surface gained focus.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "surface_focused"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "surface": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "surface"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "`wagner://panel` — an agent-authored UI spec panel. `spec` is arbitrary\nagent JSON by design (the panel DSL), so it stays a `Value`.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "panel"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "operative_id": {
+                  "type": "string"
+                },
+                "spec": true
+              },
+              "additionalProperties": false,
+              "required": [
+                "operative_id",
+                "spec"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
