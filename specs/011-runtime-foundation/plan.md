@@ -152,8 +152,14 @@ the **first connector** (Slack *or* Jira) as an `Agent` — subscribes to intent
 external API, publishes facts, owns its own retry/queue.
 **Tests:** scheduler fires a command on a fake clock; connector handles an intent +
 publishes a fact; connector failure retries without blocking the bus.
-**Acceptance:** [ ] a scheduled command triggers a connector action end-to-end (fakes)
-[ ] `make verify` green.
+**Acceptance:** [x] a scheduled command triggers a connector action end-to-end (fakes)
+[x] `make verify` green.
+**✅ DONE — `participants::SchedulerAgent` (fires queued commands when `now >= fire_at` via the
+P3 intake; deterministic under an injected clock; once-only) + `participants::SlackConnector`
+(an `Agent` subscribing to `ext.slack` `send` intents; calls an injectable `SlackTransport` with
+bounded retry; publishes an `ext.slack` `message_sent` fact). 3 tests: fake-clock firing,
+retry-then-publish, exhausted-retries-error-without-blocking-the-bus. ponytail: immediate retry
+(backoff + dead-letter when a real workspace needs it); recurring schedules re-queue (v2).**
 
 ### Step 7 — React port onto the unified stream
 **Why:** ship the UI you designed, on the real foundation.

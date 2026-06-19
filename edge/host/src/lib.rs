@@ -27,6 +27,9 @@ pub mod voice;
 // PluginManifest, Agent trait, capability vocabulary; schema catalog source.
 pub mod bus;
 
+// First-party bus participants (spec 011 P6) — the scheduler + connectors.
+pub mod participants;
+
 
 #[cfg(test)]
 mod foundation_tests {
