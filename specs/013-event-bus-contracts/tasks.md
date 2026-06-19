@@ -4,6 +4,8 @@
 **Inputs:** `spec.md` (US1=P1, US3=P2, US2=P3), `plan.md` (Rust 2021 / toolchain 1.91.1; `schemars`→schema→`json-schema-to-typescript`; module `edge/host/src/bus/`), `docs/spec/constitution.md`
 **Optional inputs:** none authored (data-model.md / research.md / quickstart.md are request-only).
 
+**Status:** ✅ COMPLETE (2026-06-19). All 24 tasks done. `make verify` green: clippy clean (edge-host + shell), 14 bus Rust tests pass, shared 34 + ui 129 + architecture 3 TS tests pass, typecheck clean, edge-build ok, hub 56/56, no schema/contract drift.
+
 > **Constitution Article I (NON-NEGOTIABLE):** every behaviour-changing task is preceded by a test task. For a types-only contract the "behaviour" is serde round-trip + schema accept/reject + no-handle + additive-versioning; those tests are written first and fail to compile (RED) until the types exist (GREEN).
 
 ---
@@ -12,9 +14,9 @@
 
 No story label.
 
-- [ ] T001 [P] Add `schemars` (1.x, draft-2020-12 capable) to root `Cargo.toml [workspace.dependencies]` and `edge/host/Cargo.toml [dependencies]`, AND smoke-confirm the three-way compat tuple (plan R1): derive a schema for a throwaway adjacently-tagged enum and assert `jsonschema 0.18` (Rust) and `ajv 8` / `json-schema-to-typescript` (TS) all accept it as draft 2020-12. Pin the confirmed versions. **This confirmation gates T005** (the first US1 test compiles against the tuple).
-- [ ] T002 [P] Add `json-schema-to-typescript` devDependency and a `"gen:contracts"` script (runs the generator over `edge/host/schemas/bus/*.json` → `shared/contracts/`) to `shared/package.json`.
-- [ ] T003 [P] Register the four new test targets (`bus_serde_roundtrip`, `bus_schema_validate`, `bus_no_handle_guard`, `bus_additive_version`) as `[[test]]` entries in `edge/host/Cargo.toml` (Cargo does not auto-discover `tests/unit/`), and create `edge/host/schemas/bus/.gitkeep` + `shared/contracts/.gitkeep`.
+- [x] T001 [P] Add `schemars` (1.x, draft-2020-12 capable) to root `Cargo.toml [workspace.dependencies]` and `edge/host/Cargo.toml [dependencies]`, AND smoke-confirm the three-way compat tuple (plan R1): derive a schema for a throwaway adjacently-tagged enum and assert `jsonschema 0.18` (Rust) and `ajv 8` / `json-schema-to-typescript` (TS) all accept it as draft 2020-12. Pin the confirmed versions. **This confirmation gates T005** (the first US1 test compiles against the tuple).
+- [x] T002 [P] Add `json-schema-to-typescript` devDependency and a `"gen:contracts"` script (runs the generator over `edge/host/schemas/bus/*.json` → `shared/contracts/`) to `shared/package.json`.
+- [x] T003 [P] Register the four new test targets (`bus_serde_roundtrip`, `bus_schema_validate`, `bus_no_handle_guard`, `bus_additive_version`) as `[[test]]` entries in `edge/host/Cargo.toml` (Cargo does not auto-discover `tests/unit/`), and create `edge/host/schemas/bus/.gitkeep` + `shared/contracts/.gitkeep`.
 
 ---
 
@@ -22,7 +24,7 @@ No story label.
 
 The compiling skeleton every story builds on. No types yet, so no test precedes it. No story label.
 
-- [ ] T004 Add `pub mod bus;` to `edge/host/src/lib.rs`; create `edge/host/src/bus/mod.rs` with the contract's module rustdoc (namespaced, stability-tiered, additive-versioned, `#[serde(deny_unknown_fields)]`, "the exported schemas under `edge/host/schemas/bus/` ARE the catalog") and empty submodule declarations (`mod envelope; mod event; mod command; mod participant; mod manifest;` over empty files) so `cargo build` is green.
+- [x] T004 Add `pub mod bus;` to `edge/host/src/lib.rs`; create `edge/host/src/bus/mod.rs` with the contract's module rustdoc (namespaced, stability-tiered, additive-versioned, `#[serde(deny_unknown_fields)]`, "the exported schemas under `edge/host/schemas/bus/` ARE the catalog") and empty submodule declarations (`mod envelope; mod event; mod command; mod participant; mod manifest;` over empty files) so `cargo build` is green.
 
 **Checkpoint:** crate compiles with an empty `bus` module; the four test targets resolve. User-story phases can begin.
 
@@ -35,20 +37,20 @@ The compiling skeleton every story builds on. No types yet, so no test precedes 
 
 ### Tests for User Story 1 (write FIRST, ensure they FAIL)
 
-- [ ] T005 [P] [US1] Serde round-trip test in `edge/host/tests/unit/bus_serde_roundtrip.rs` — construct an `Envelope` carrying a representative `Event` of each namespace (Run/Goal/Vault/Voice/Ui) and a `Command` of each; assert `deserialize(serialize(x)) == x` byte-for-byte. Covers **SC-001, AS-1**.
-- [ ] T006 [P] [US1] Schema validation test in `edge/host/tests/unit/bus_schema_validate.rs` — every core payload validates against its exported `edge/host/schemas/bus/*.json` via `crate::schema::validate`; a payload with an extra or wrong-typed field is **rejected** (`additionalProperties:false`); assert each persisted payload carries its `schema` version id and every contract type carries a stability tier. Covers **SC-002, SC-003, SC-008, AS-2, EC-003**.
-- [ ] T007 [P] [US1] No-handle seam guard in `edge/host/tests/unit/bus_no_handle_guard.rs` — a `fn assert_plain<T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static>() {}` invoked for `Event`, `Command`, `Envelope` (a `JoinHandle`/`AppHandle`/sender/closure field would fail these bounds → fails to compile); plus a `NoopAgent` dummy `impl Agent` proving the trait signature is implementable, whose `subscriptions()` returns a `Vec<Subscription>` carrying a topic/namespace filter (e.g. `vault.*`) — assert that `Subscription` value serde-round-trips, exercising the `Subscription` shape (FR-011). Covers **SC-004, AS-3, FR-011, FR-013, FR-018**.
-- [ ] T008 [P] [US1] Additive-versioning regression in `edge/host/tests/unit/bus_additive_version.rs` — add an `Option<T>` field to a `stable` contract type + bump its `version`; assert a payload written against the prior schema still validates (no required field added, none removed/retyped). Covers **SC-005, US2-AS-3, FR-017**.
-- [ ] T009 [P] [US1] Manifest contract test in `edge/host/tests/unit/bus_schema_validate.rs` — a `PluginManifest` expresses participants-provided, emit/subscribe namespaces, registered schema refs, requested capabilities, and a stability tier; a **zero-capability** manifest is valid. Covers **AS-4, EC-004, FR-012, FR-014**.
+- [x] T005 [P] [US1] Serde round-trip test in `edge/host/tests/unit/bus_serde_roundtrip.rs` — construct an `Envelope` carrying a representative `Event` of each namespace (Run/Goal/Vault/Voice/Ui) and a `Command` of each; assert `deserialize(serialize(x)) == x` byte-for-byte. Covers **SC-001, AS-1**.
+- [x] T006 [P] [US1] Schema validation test in `edge/host/tests/unit/bus_schema_validate.rs` — every core payload validates against its exported `edge/host/schemas/bus/*.json` via `crate::schema::validate`; a payload with an extra or wrong-typed field is **rejected** (`additionalProperties:false`); assert each persisted payload carries its `schema` version id and every contract type carries a stability tier. Covers **SC-002, SC-003, SC-008, AS-2, EC-003**.
+- [x] T007 [P] [US1] No-handle seam guard in `edge/host/tests/unit/bus_no_handle_guard.rs` — a `fn assert_plain<T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static>() {}` invoked for `Event`, `Command`, `Envelope` (a `JoinHandle`/`AppHandle`/sender/closure field would fail these bounds → fails to compile); plus a `NoopAgent` dummy `impl Agent` proving the trait signature is implementable, whose `subscriptions()` returns a `Vec<Subscription>` carrying a topic/namespace filter (e.g. `vault.*`) — assert that `Subscription` value serde-round-trips, exercising the `Subscription` shape (FR-011). Covers **SC-004, AS-3, FR-011, FR-013, FR-018**.
+- [x] T008 [P] [US1] Additive-versioning regression in `edge/host/tests/unit/bus_additive_version.rs` — add an `Option<T>` field to a `stable` contract type + bump its `version`; assert a payload written against the prior schema still validates (no required field added, none removed/retyped). Covers **SC-005, US2-AS-3, FR-017**.
+- [x] T009 [P] [US1] Manifest contract test in `edge/host/tests/unit/bus_schema_validate.rs` — a `PluginManifest` expresses participants-provided, emit/subscribe namespaces, registered schema refs, requested capabilities, and a stability tier; a **zero-capability** manifest is valid. Covers **AS-4, EC-004, FR-012, FR-014**.
 
 ### Implementation for User Story 1
 
-- [ ] T010 [P] [US1] Define `Event` in `edge/host/src/bus/event.rs` — adjacently-tagged `#[serde(tag = "type", content = "data")]` enum over `Run | Goal | Vault | Voice | Ui` + `Ext { ns, name, version, payload }`, with **one representative past-tense seed variant per namespace** (e.g. `RunFinished`, `GoalAdded`, `NoteUpdated`, `UtteranceTranscribed`, `SurfaceFocused`); full leaf enumeration is deferred to `011` P0 and lands additively (FR-006). Derive `Serialize, Deserialize, schemars::JsonSchema`; `#[serde(deny_unknown_fields)]`. Covers **FR-006, FR-008, FR-009**.
-- [ ] T011 [P] [US1] Define `Command` in `edge/host/src/bus/command.rs` — same namespaces + `Ext`, one **imperative** seed variant per namespace (e.g. `StartRun`, `AddGoal`); leaves deferred to `011` P0 (FR-007). Same derives + `deny_unknown_fields`. Covers **FR-007, FR-008, FR-009**.
-- [ ] T012 [P] [US1] Define `ParticipantId { node: iroh::NodeId, kind: ParticipantKind, name: String, instance: Ulid }`, `ParticipantKind { GoalLoop, Agent, Connector, Scheduler, Ui, System }`, the `Agent` trait signature (`name`, `subscriptions`, async `init`/`handle`/`shutdown`), and `Subscription` (topic/namespace + filter selector) in `edge/host/src/bus/participant.rs`. Covers **FR-003, FR-011, FR-013**.
-- [ ] T013 [P] [US1] Define `PluginManifest`, `Capability` (closed v1 enum, exactly 7: `Network, ProcessSpawn, VaultRead, VaultWrite, FsRead, FsWrite, SecretsRead`), and `StabilityTier { Stable, Experimental, Internal }` (new types default `Experimental`) in `edge/host/src/bus/manifest.rs`. Covers **FR-010, FR-012, FR-014**.
-- [ ] T014 [US1] Define `EventId(Ulid)`, `Timestamp`, `StreamId { Run, Agent, Workspace }`, `Scope { user, workspace }`, and the `Envelope` struct (wrapping `Event` payload + `ParticipantId` origin + `StreamId` + `seq: u64` + `Scope`) in `edge/host/src/bus/envelope.rs`. Depends on T010 (Event) + T012 (ParticipantId). Covers **FR-001, FR-002, FR-004, FR-005, FR-016**.
-- [ ] T015 [US1] Implement `bus::export_schemas() -> Vec<(name, serde_json::Value)>` in `edge/host/src/bus/mod.rs` (`schemars::schema_for!` per contract type), write the committed catalog to `edge/host/schemas/bus/*.json`, and make `bus_schema_validate.rs` assert committed == fresh export (drift guard; regeneration gated behind `UPDATE_SCHEMAS=1`). Depends on T010–T014. Covers **FR-015, FR-019, SC-002**.
+- [x] T010 [P] [US1] Define `Event` in `edge/host/src/bus/event.rs` — adjacently-tagged `#[serde(tag = "type", content = "data")]` enum over `Run | Goal | Vault | Voice | Ui` + `Ext { ns, name, version, payload }`, with **one representative past-tense seed variant per namespace** (e.g. `RunFinished`, `GoalAdded`, `NoteUpdated`, `UtteranceTranscribed`, `SurfaceFocused`); full leaf enumeration is deferred to `011` P0 and lands additively (FR-006). Derive `Serialize, Deserialize, schemars::JsonSchema`; `#[serde(deny_unknown_fields)]`. Covers **FR-006, FR-008, FR-009**.
+- [x] T011 [P] [US1] Define `Command` in `edge/host/src/bus/command.rs` — same namespaces + `Ext`, one **imperative** seed variant per namespace (e.g. `StartRun`, `AddGoal`); leaves deferred to `011` P0 (FR-007). Same derives + `deny_unknown_fields`. Covers **FR-007, FR-008, FR-009**.
+- [x] T012 [P] [US1] Define `ParticipantId { node: iroh::NodeId, kind: ParticipantKind, name: String, instance: Ulid }`, `ParticipantKind { GoalLoop, Agent, Connector, Scheduler, Ui, System }`, the `Agent` trait signature (`name`, `subscriptions`, async `init`/`handle`/`shutdown`), and `Subscription` (topic/namespace + filter selector) in `edge/host/src/bus/participant.rs`. Covers **FR-003, FR-011, FR-013**.
+- [x] T013 [P] [US1] Define `PluginManifest`, `Capability` (closed v1 enum, exactly 7: `Network, ProcessSpawn, VaultRead, VaultWrite, FsRead, FsWrite, SecretsRead`), and `StabilityTier { Stable, Experimental, Internal }` (new types default `Experimental`) in `edge/host/src/bus/manifest.rs`. Covers **FR-010, FR-012, FR-014**.
+- [x] T014 [US1] Define `EventId(Ulid)`, `Timestamp`, `StreamId { Run, Agent, Workspace }`, `Scope { user, workspace }`, and the `Envelope` struct (wrapping `Event` payload + `ParticipantId` origin + `StreamId` + `seq: u64` + `Scope`) in `edge/host/src/bus/envelope.rs`. Depends on T010 (Event) + T012 (ParticipantId). Covers **FR-001, FR-002, FR-004, FR-005, FR-016**.
+- [x] T015 [US1] Implement `bus::export_schemas() -> Vec<(name, serde_json::Value)>` in `edge/host/src/bus/mod.rs` (`schemars::schema_for!` per contract type), write the committed catalog to `edge/host/schemas/bus/*.json`, and make `bus_schema_validate.rs` assert committed == fresh export (drift guard; regeneration gated behind `UPDATE_SCHEMAS=1`). Depends on T010–T014. Covers **FR-015, FR-019, SC-002**.
 
 **Checkpoint:** the US1 Independent Test passes end-to-end (round-trip + schema accept/reject + no-handle guard across all 5 namespaces + manifest); `make verify` green (nothing wired). **This is the shippable MVP.**
 
@@ -61,13 +63,13 @@ The compiling skeleton every story builds on. No types yet, so no test precedes 
 
 ### Tests for User Story 3 (write FIRST, ensure they FAIL)
 
-- [ ] T016 [P] [US3] TS binding compile test in `shared/contracts/contracts.test.ts` — import every `stable`-tier core type from the generated `shared/contracts/` barrel and construct a representative value; `tsc -p shared/tsconfig.json` must compile it (RED until generation runs). Covers **SC-007, AS-1**.
-- [ ] T017 [P] [US3] TS payload validation test in `shared/contracts/contracts.test.ts` — a representative payload validates against its committed `edge/host/schemas/bus/*.json` via `ajv` (already a `shared` devDep). Covers **AS-2, D-TEST-3**.
+- [x] T016 [P] [US3] TS binding compile test in `shared/contracts/contracts.test.ts` — import every `stable`-tier core type from the generated `shared/contracts/` barrel and construct a representative value; `tsc -p shared/tsconfig.json` must compile it (RED until generation runs). Covers **SC-007, AS-1**.
+- [x] T017 [P] [US3] TS payload validation test in `shared/contracts/contracts.test.ts` — a representative payload validates against its committed `edge/host/schemas/bus/*.json` via `ajv` (already a `shared` devDep). Covers **AS-2, D-TEST-3**.
 
 ### Implementation for User Story 3
 
-- [ ] T018 [US3] Implement the `gen:contracts` script (json-schema-to-typescript over `edge/host/schemas/bus/*.json` → `shared/contracts/*.d.ts` + `index.ts` barrel); generate the bindings; wire it into `make ts` (or a new `make contracts`). Depends on T015 (schemas must exist). Covers **FR-019, SC-007**.
-- [ ] T019 [US3] Extend the dependency-direction guard so the generated `shared/contracts/` is asserted to import nothing from `platform/` (pure types only). Covers **Gate VII**.
+- [x] T018 [US3] Implement the `gen:contracts` script (json-schema-to-typescript over `edge/host/schemas/bus/*.json` → `shared/contracts/*.d.ts` + `index.ts` barrel); generate the bindings; wire it into `make ts` (or a new `make contracts`). Depends on T015 (schemas must exist). Covers **FR-019, SC-007**.
+- [x] T019 [US3] Extend the dependency-direction guard so the generated `shared/contracts/` is asserted to import nothing from `platform/` (pure types only). Covers **Gate VII**.
 
 **Checkpoint:** TS bindings generate + compile; a representative payload validates via `ajv`; Rust→TS drift fails at regen-diff, not in the frontend.
 
@@ -80,11 +82,11 @@ The compiling skeleton every story builds on. No types yet, so no test precedes 
 
 ### Tests for User Story 2 (write FIRST, ensure they FAIL)
 
-- [ ] T020 [P] [US2] Ext extension test in `edge/host/tests/unit/bus_schema_validate.rs` — an `Event::Ext { ns, name, version, payload }` whose `payload` matches a registered fixture schema validates; an `Ext` payload with an unexpected/oversized field is **rejected** (`additionalProperties:false`); assert the core `Event` enum source is unchanged (no new core variant). Covers **SC-006, AS-1, AS-2, EC-005**.
+- [x] T020 [P] [US2] Ext extension test in `edge/host/tests/unit/bus_schema_validate.rs` — an `Event::Ext { ns, name, version, payload }` whose `payload` matches a registered fixture schema validates; an `Ext` payload with an unexpected/oversized field is **rejected** (`additionalProperties:false`); assert the core `Event` enum source is unchanged (no new core variant). Covers **SC-006, AS-1, AS-2, EC-005**.
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] Add a registered extension-schema fixture `edge/host/tests/fixtures/ext/ext-slack-message.schema.json` and an `Ext`-payload resolution helper in `edge/host/src/bus/event.rs` that looks up the schema by `{ns, name, version}` from the compile-time catalog (FR-019 decision) and validates the payload. No new core `Event` variant. Covers **FR-009, SC-006**.
+- [x] T021 [US2] Add a registered extension-schema fixture `edge/host/tests/fixtures/ext/ext-slack-message.schema.json` and an `Ext`-payload resolution helper in `edge/host/src/bus/event.rs` that looks up the schema by `{ns, name, version}` from the compile-time catalog (FR-019 decision) and validates the payload. No new core `Event` variant. Covers **FR-009, SC-006**.
 
 **Checkpoint:** an `Ext{…}` event validates against its registered schema with zero core-enum edits; all three stories pass independently.
 
@@ -92,9 +94,9 @@ The compiling skeleton every story builds on. No types yet, so no test precedes 
 
 ## Final Phase — Polish & Cross-Cutting Concerns
 
-- [ ] T022 [P] Module rustdoc pass on `edge/host/src/bus/mod.rs` — document the stability tiers, the additive-versioning no-break rule (FR-017), and the declared-not-enforced capability gap (sandbox deferred, `specs/012` §13.7).
-- [ ] T023 Verify gates green: `make verify` (cargo test + `clippy --all-targets -- -D warnings`) + `make ts` + `make typecheck`; confirm `cmp -s CLAUDE.md AGENTS.md` still matches (no agent-guidance change in this phase).
-- [ ] T024 [P] Refactor per /tdd Refactor — confirm `#[serde(deny_unknown_fields)]` on every contract type; no namespace/type uses floor-era vocabulary (D-PROJ-3); seed-variant names follow past-tense (Event) / imperative (Command).
+- [x] T022 [P] Module rustdoc pass on `edge/host/src/bus/mod.rs` — document the stability tiers, the additive-versioning no-break rule (FR-017), and the declared-not-enforced capability gap (sandbox deferred, `specs/012` §13.7).
+- [x] T023 Verify gates green: `make verify` (cargo test + `clippy --all-targets -- -D warnings`) + `make ts` + `make typecheck`; confirm `cmp -s CLAUDE.md AGENTS.md` still matches (no agent-guidance change in this phase).
+- [x] T024 [P] Refactor per /tdd Refactor — confirm `#[serde(deny_unknown_fields)]` on every contract type; no namespace/type uses floor-era vocabulary (D-PROJ-3); seed-variant names follow past-tense (Event) / imperative (Command).
 
 ---
 

@@ -23,6 +23,10 @@ pub mod tray;
 // Voice pillar (spec 007) — STT/TTS trait seam, router, and pipeline.
 pub mod voice;
 
+// Event-bus contracts (spec 013) — typed Envelope/Event/Command taxonomy,
+// PluginManifest, Agent trait, capability vocabulary; schema catalog source.
+pub mod bus;
+
 
 #[cfg(test)]
 mod foundation_tests {

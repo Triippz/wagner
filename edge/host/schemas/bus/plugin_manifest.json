@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PluginManifest",
+  "description": "The uniform plugin manifest (FR-012): what a plugin provides, the namespaces\nit emits/subscribes, the schemas it registers, the capabilities it requests,\nand its stability tier. An empty `capabilities` set is valid — a pure\nsubscriber requests nothing (EC-004).",
+  "type": "object",
+  "properties": {
+    "participants_provided": {
+      "description": "Logical names of the participants (each an `Agent`) this plugin provides.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "emits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Namespace"
+      }
+    },
+    "subscribes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Namespace"
+      }
+    },
+    "registered_schemas": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SchemaRef"
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Capability"
+      }
+    },
+    "stability": {
+      "$ref": "#/$defs/StabilityTier",
+      "default": "experimental"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "participants_provided",
+    "emits",
+    "subscribes",
+    "registered_schemas",
+    "capabilities"
+  ],
+  "$defs": {
+    "Namespace": {
+      "description": "The v1 event/command namespaces a plugin may emit or subscribe to.",
+      "type": "string",
+      "enum": [
+        "run",
+        "goal",
+        "vault",
+        "voice",
+        "ui",
+        "ext"
+      ]
+    },
+    "SchemaRef": {
+      "description": "A reference to a JSON Schema a plugin registers (name + version).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ]
+    },
+    "Capability": {
+      "description": "The **closed** v1 capability vocabulary (FR-014): the coarse permission kinds\na plugin may request. Honored on trust today (declared, not enforced — the\nsandbox is deferred, `specs/012` §13.7); the set grows additively. No\nper-path/per-host scoping in v1.",
+      "type": "string",
+      "enum": [
+        "network",
+        "process.spawn",
+        "vault.read",
+        "vault.write",
+        "fs.read",
+        "fs.write",
+        "secrets.read"
+      ]
+    },
+    "StabilityTier": {
+      "description": "The stability tier of a contract type (FR-010). A newly added type defaults\nto `Experimental`; promotion to `Stable` (which binds the no-break rule\nFR-017) is a deliberate change; `Internal` is for engine-private types.",
+      "type": "string",
+      "enum": [
+        "stable",
+        "experimental",
+        "internal"
+      ]
+    }
+  }
+}

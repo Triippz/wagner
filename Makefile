@@ -64,8 +64,14 @@ clippy:
 e2e:
 	cargo test $(CARGO_EDGE_HOST) --test gate_e2e -- --nocapture
 
+# Generate the TS bus-contract bindings from the exported JSON Schemas (the Rust
+# types are the source; spec 013 FR-019). Run before TS test/typecheck so the
+# generated bindings never drift from the schemas.
+contracts:
+	npm run gen:contracts -w @wagner/shared
+
 # TypeScript: edge UI + shared reducer + arch-boundary tests (all workspaces).
-ts:
+ts: contracts
 	npm run test
 
 # Architecture-boundary tests only (dependency direction).
@@ -73,7 +79,7 @@ arch:
 	npm run test:arch
 
 # TypeScript type-check across all workspaces (no emit).
-typecheck:
+typecheck: contracts
 	npm run typecheck
 
 # Hub (Deno): OIDC + discovery registry unit + contract tests.

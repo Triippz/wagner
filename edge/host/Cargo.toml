@@ -14,6 +14,7 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 jsonschema = { workspace = true }
+schemars = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 portable-pty = { workspace = true }
@@ -158,3 +159,21 @@ path = "tests/integration/vault_sync_live.rs"
 [[test]]
 name = "vault_sync_n0_e2e"
 path = "tests/vault_sync_n0_e2e.rs"
+
+# 013 — event-bus contract tests (types-only; serde round-trip, schema
+# accept/reject, no-handle seam guard, additive-versioning regression).
+[[test]]
+name = "bus_serde_roundtrip"
+path = "tests/unit/bus_serde_roundtrip.rs"
+
+[[test]]
+name = "bus_schema_validate"
+path = "tests/unit/bus_schema_validate.rs"
+
+[[test]]
+name = "bus_no_handle_guard"
+path = "tests/unit/bus_no_handle_guard.rs"
+
+[[test]]
+name = "bus_additive_version"
+path = "tests/unit/bus_additive_version.rs"

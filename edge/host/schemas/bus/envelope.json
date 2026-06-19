@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Envelope",
+  "description": "The unit carried by the bus: a typed `Event` payload wrapped with identity,\nordering, and scope (FR-001/FR-002). `stream` + monotonic `seq` make\nper-stream ordering expressible (enforcement is `011` P1).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "description": "Schema-version id (FR-016) — always `\"envelope.v1\"` for this version.",
+      "type": "string"
+    },
+    "id": {
+      "$ref": "#/$defs/EventId"
+    },
+    "ts": {
+      "$ref": "#/$defs/Timestamp"
+    },
+    "origin": {
+      "$ref": "#/$defs/ParticipantId"
+    },
+    "stream": {
+      "$ref": "#/$defs/StreamId"
+    },
+    "seq": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope"
+    },
+    "payload": {
+      "$ref": "#/$defs/Event"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "ts",
+    "origin",
+    "stream",
+    "seq",
+    "scope",
+    "payload"
+  ],
+  "$defs": {
+    "EventId": {
+      "description": "A unique, sortable event id (ULID), serialized as a Crockford-base32 string.",
+      "type": "string"
+    },
+    "Timestamp": {
+      "description": "An RFC 3339 timestamp. Carried as a string at the contract boundary; parsed\nto a calendar type only where a consumer needs ordering (`011`).",
+      "type": "string"
+    },
+    "ParticipantId": {
+      "description": "Stable identity of a participant (FR-003): which peer/machine, what kind, a\nstable logical name, and a per-instance id.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "description": "The peer/machine identity (iroh node id, z-base-32).",
+          "$ref": "#/$defs/NodeId"
+        },
+        "kind": {
+          "$ref": "#/$defs/ParticipantKind"
+        },
+        "name": {
+          "description": "A stable logical name (e.g. `\"goal-loop\"`, `\"slack-connector\"`).",
+          "type": "string"
+        },
+        "instance": {
+          "description": "Distinguishes two live instances of the same logical name.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "node",
+        "kind",
+        "name",
+        "instance"
+      ]
+    },
+    "NodeId": {
+      "description": "An iroh node identity in its canonical z-base-32 string form. The contract\ncarries the identity as a string; it is parsed to `iroh::NodeId` at the\nintake boundary (`011` P3), where peer identity is actually authorized.",
+      "type": "string"
+    },
+    "ParticipantKind": {
+      "description": "The kind of participant behind a [`ParticipantId`].",
+      "type": "string",
+      "enum": [
+        "goal_loop",
+        "agent",
+        "connector",
+        "scheduler",
+        "ui",
+        "system"
+      ]
+    },
+    "StreamId": {
+      "description": "The ordering scope of an event (FR-005). `Run` is the common case; new kinds\nare added additively.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "run"
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "agent"
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "workspace"
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Scope": {
+      "description": "The multi-tenant filter seam (FR-004) — exactly `{user, workspace}` in v1; an\norg tier or further fields are added additively when multi-tenant lands.",
+      "type": "object",
+      "properties": {
+        "user": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "workspace"
+      ]
+    },
+    "Event": {
+      "description": "A namespaced, past-tense fact carried by the bus. Adjacently tagged as\n`{ \"type\": <namespace>, \"data\": <leaf> }`. The namespace set is the **stable\nstructure**; leaf variants land additively inside each namespace enum without\nediting this core (FR-006).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "run"
+            },
+            "data": {
+              "$ref": "#/$defs/RunEvent"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "goal"
+            },
+            "data": {
+              "$ref": "#/$defs/GoalEvent"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "vault"
+            },
+            "data": {
+              "$ref": "#/$defs/VaultEvent"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "voice"
+            },
+            "data": {
+              "$ref": "#/$defs/VoiceEvent"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ui"
+            },
+            "data": {
+              "$ref": "#/$defs/UiEvent"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "description": "Extension fact in a plugin-owned namespace; `payload` validates against\nthe schema registered for `{ns, name, version}` (FR-009).",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ext"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "ns": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "payload": true
+              },
+              "additionalProperties": false,
+              "required": [
+                "ns",
+                "name",
+                "version",
+                "payload"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RunEvent": {
+      "description": "Run-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`run.finished` — a run reached a terminal state.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "finished"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "run_id",
+                "ok"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "GoalEvent": {
+      "description": "Goal-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`goal.added` — a goal entered the backlog.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "added"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "goal_id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "goal_id",
+                "title"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "VaultEvent": {
+      "description": "Vault-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`vault.note_updated` — a note's contents changed.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "note_updated"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "rev": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "rev"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "VoiceEvent": {
+      "description": "Voice-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`voice.utterance_transcribed` — STT produced text for an utterance.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "utterance_transcribed"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "text"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UiEvent": {
+      "description": "UI-namespace facts.",
+      "oneOf": [
+        {
+          "description": "`ui.surface_focused` — a workspace surface gained focus.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "surface_focused"
+            },
+            "data": {
+              "type": "object",
+              "properties": {
+                "surface": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "surface"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
