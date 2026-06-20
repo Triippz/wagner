@@ -188,7 +188,6 @@ async fn context_publish_stamps_agent_identity() {
 #[tokio::test]
 async fn serve_commands_routes_abort_to_cancel_and_steer_to_steer() {
     use tokio::sync::mpsc;
-    use wagner_edge_host::bus::{Command, RunCommand};
 
     let bus = Arc::new(Bus::new(64));
     let reg = Arc::new(AgentRegistry::new(Arc::clone(&bus)));

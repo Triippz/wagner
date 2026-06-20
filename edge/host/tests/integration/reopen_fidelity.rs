@@ -88,6 +88,7 @@ async fn reopening_folds_the_host_log_to_the_identical_snapshot() {
             external_halt: &no_halt,
             progress: &|_| {},
             emit_panel: &|_, _| {},
+            cancel: None,
         },
     )
     .await;

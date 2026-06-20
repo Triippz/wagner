@@ -20,7 +20,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use futures::future::BoxFuture;
 use tokio::sync::{mpsc, watch};
@@ -35,7 +34,7 @@ use super::{
 use crate::orchestrator::goal_loop_agent::GoalLoopAgent;
 use crate::orchestrator::judge::SuiteResult;
 use crate::orchestrator::run_loop::AgentPool;
-use crate::state::{HaltReason, Run, RunPhase, RunStatus};
+use crate::state::{Run, RunPhase, RunStatus};
 
 /// The steer callback type: called on `steer(run_id, text)` to deliver console
 /// input to a live (or just-cancelled) run. Boxed behind `Arc` for cheap clone
@@ -114,7 +113,10 @@ enum Entry {
     /// `AgentRegistry::steer_fns` (separate map) so steer() works even
     /// immediately after cancel() removes this entry (T004).
     Run {
-        task: JoinHandle<()>,
+        /// `None` for an inline-driven run (`spawn_run_and_drive`) that has no
+        /// spawned task — cancellation flows entirely through `cancel_tx`, which
+        /// `run_goal` `select!`s against.
+        task: Option<JoinHandle<()>>,
         cancel_tx: watch::Sender<bool>,
     },
 }
@@ -123,7 +125,8 @@ impl Entry {
     fn abort_task(&self) {
         match self {
             Entry::Agent(h) => h.abort(),
-            Entry::Run { task, .. } => task.abort(),
+            Entry::Run { task: Some(task), .. } => task.abort(),
+            Entry::Run { task: None, .. } => {}
         }
     }
 }
@@ -311,7 +314,7 @@ impl AgentRegistry {
 
         self.running.lock().expect("registry not poisoned").insert(
             run_id,
-            Entry::Run { task, cancel_tx },
+            Entry::Run { task: Some(task), cancel_tx },
         );
 
         Ok(())
@@ -410,35 +413,25 @@ impl AgentRegistry {
             });
         }
 
-        let timeout_secs = run.guardrails.blocked_timeout_secs;
-        let drive = agent.run(run, pool, runs_root, run_suite);
+        // Register a cancel watch so cancel(run_id) can interrupt this inline drive:
+        // run_goal select!s on the receiver and drops the in-flight turn on cancel
+        // (FR-013). There is no spawned task — task: None.
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        self.running.lock().expect("registry not poisoned").insert(
+            run_id.clone(),
+            Entry::Run { task: None, cancel_tx },
+        );
 
-        if timeout_secs > 0 {
-            match tokio::time::timeout(Duration::from_secs(u64::from(timeout_secs)), drive).await {
-                Ok(final_run) => final_run,
-                Err(_elapsed) => {
-                    // Timeout fired (T010: blocked_timeout_secs = 1 + infinite-loop pool).
-                    let mut halted = make_aborted_run(&run_id);
-                    halted.status = RunStatus::HaltedGuardrail;
-                    halted.phase = RunPhase::Halted;
-                    halted.halt_reason = Some(HaltReason::BlockedTimeout);
-                    // Publish the halted terminal snapshot (FR-006).
-                    use super::{RunEvent, StreamId};
-                    self.bus.publish(Envelope::new(
-                        EventId(Ulid::new()),
-                        Timestamp(chrono::Utc::now().to_rfc3339()),
-                        supervisor_pid(),
-                        StreamId::Run(run_id.clone()),
-                        0,
-                        Scope { user: "local".into(), workspace: "local".into() },
-                        Event::Run(RunEvent::Snapshot(Box::new(halted.clone()))),
-                    ));
-                    halted
-                }
-            }
-        } else {
-            drive.await
-        }
+        let final_run = agent
+            .with_cancel(cancel_rx)
+            .run(run, pool, runs_root, run_suite)
+            .await;
+
+        // Deregister — cancel() may have already removed it; either way the run is
+        // no longer live.
+        self.running.lock().expect("registry not poisoned").remove(&run_id);
+        self.steer_fns.lock().expect("registry not poisoned").remove(&run_id);
+        final_run
     }
 
     /// Deliver a steering instruction to a live run's console. If the run is not

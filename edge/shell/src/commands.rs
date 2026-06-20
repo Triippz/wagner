@@ -206,6 +206,7 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
                 external_halt: &external_halt,
                 progress: &progress,
                 emit_panel: &emit_panel,
+                cancel: None,
             },
         )
         .await;

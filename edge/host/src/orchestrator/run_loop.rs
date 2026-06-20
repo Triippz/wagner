@@ -68,6 +68,11 @@ pub struct LoopDeps<'a> {
     /// spec JSON)`. Called when an agent emits a ```ui-spec block; the frontend
     /// validates/sanitizes before rendering. No-op in tests.
     pub emit_panel: &'a (dyn Fn(&str, serde_json::Value) + Send + Sync),
+    /// 014 US1: a cooperative cancel signal the loop `select!`s against. When it
+    /// flips to `true` (registry.cancel), the in-flight turn's await is dropped
+    /// (kill_on_drop terminates a real CLI child) and the loop returns a terminal
+    /// Aborted run (FR-013, FR-006). `None` for non-cancellable callers.
+    pub cancel: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 /// Project an engine outcome's signals into events for one hired agent and emit
@@ -115,7 +120,22 @@ fn save_run(runs_root: &Path, run: &Run) {
     }
 }
 
-/// Run the goal loop to completion (met / halted). Returns the final `Run`.
+/// A minimal terminal Aborted run for the cancel path (FR-006/FR-013). The live
+/// run state was moved into the cancelled drive; the run_id is enough for the UI
+/// reducer (which keys on run_id) to leave "running".
+fn aborted_run(run_id: &str) -> Run {
+    let mut run = Run::new(
+        run_id.to_string(),
+        String::new(),
+        Vec::new(),
+        chrono::Utc::now().to_rfc3339(),
+    );
+    run.status = RunStatus::Aborted;
+    run.phase = crate::state::RunPhase::Halted;
+    run
+}
+
+/// Run the goal loop to completion (met / halted / cancelled). Returns the final `Run`.
 pub async fn run_goal(mut run: Run, deps: LoopDeps<'_>) -> Run {
     use crate::state::RunPhase;
     run.status = RunStatus::Running;
@@ -123,13 +143,19 @@ pub async fn run_goal(mut run: Run, deps: LoopDeps<'_>) -> Run {
     save_run(deps.runs_root, &run);
     (deps.progress)(&run);
 
+    let run_id = run.run_id.clone();
+    let mut cancel = deps.cancel.clone();
+
     // Index into `run.subtasks` where the most recent dispatch batch begins.
     // Goal-met convergence is judged over the LATEST batch only, so a subtask
     // that failed in an earlier iteration cannot permanently block `Met` once a
     // later iteration supersedes it (M5).
-    let mut last_batch_start = 0usize;
+    // The driving loop as a cancellable future (014 US1). On cancel the in-flight
+    // turn's await is dropped (kill_on_drop terminates a real CLI child).
+    let drive = async move {
+        let mut last_batch_start = 0usize;
 
-    loop {
+        loop {
         // 0. Drain live steering into the run so this iteration's plan pass sees it.
         for input in (deps.steer)() {
             run.console_inputs.push(input);
@@ -329,6 +355,27 @@ pub async fn run_goal(mut run: Run, deps: LoopDeps<'_>) -> Run {
         run.iteration += 1;
         save_run(deps.runs_root, &run);
         (deps.progress)(&run);
+        }
+    };
+
+    // Race the drive against the cancel signal. `biased` checks cancel first so an
+    // abort that arrives with a turn in-flight wins deterministically (FR-014).
+    match cancel.as_mut() {
+        Some(rx) => {
+            tokio::pin!(drive);
+            loop {
+                tokio::select! {
+                    biased;
+                    changed = rx.changed() => {
+                        if changed.is_err() || *rx.borrow() {
+                            return aborted_run(&run_id);
+                        }
+                    }
+                    out = &mut drive => return out,
+                }
+            }
+        }
+        None => drive.await,
     }
 }
 

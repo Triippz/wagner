@@ -525,20 +525,18 @@ describe("T032 — reducer-replay of aborted terminal", () => {
 
     // Construct a RunSnapshot as the bus would emit it (status: Aborted).
     const liveSnapshot: RunSnapshot = {
-      schema: "run-state.v1",
+      schema: "wagner-run.v1",
       run_id: RUN_ID,
       goal: "parity check",
       status: "aborted" as const,
       phase: "halted",
       iteration: 1,
-      max_iterations: 10,
-      cost: 0,
-      max_cost: 5,
-      started_at: STARTED_AT,
-      finished_at: ENDED_AT,
+      guardrails: {
+        blocked_timeout_secs: 0,
+        cost: { mode: "cli_usage", budget: 5, used: 0 },
+      },
       halt_reason: null,
       subtasks: [],
-      steer_history: [],
     };
 
     const uiState = applyRun(initialState, liveSnapshot);
@@ -552,7 +550,7 @@ describe("T032 — reducer-replay of aborted terminal", () => {
     expect(uiRun?.iteration).toBe(1);
     // Both agree the run is terminal.
     expect(eventSourcedSnapshot.ended_at).toBe(ENDED_AT);
-    expect(uiRun?.finished_at).toBe(ENDED_AT);
+    expect(uiRun?.phase).toBe("halted");
   });
 
   it("replayRun throws on event before run.created (malformed log)", () => {

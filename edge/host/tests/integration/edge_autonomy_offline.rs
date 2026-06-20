@@ -197,6 +197,7 @@ async fn run_completes_offline_with_zero_hub_calls() {
             external_halt: &no_halt,
             progress: &|_r| {},
             emit_panel: &|_id, _spec| {},
+            cancel: None,
         },
     )
     .await;

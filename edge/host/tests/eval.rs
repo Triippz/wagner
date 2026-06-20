@@ -155,6 +155,7 @@ async fn eval_slugify_goal_reaches_met_with_both_factions_and_valid_state() {
             external_halt: &no_halt,
             progress: &no_progress,
             emit_panel: &no_panel,
+            cancel: None,
         },
     )
     .await;

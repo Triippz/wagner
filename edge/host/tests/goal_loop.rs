@@ -174,6 +174,7 @@ async fn loop_reaches_met_when_plan_suite_and_judge_agree() {
             external_halt: &no_halt,
             progress: &no_progress,
             emit_panel: &no_panel,
+            cancel: None,
         },
     )
     .await;
@@ -213,6 +214,7 @@ async fn loop_halts_on_max_iterations_when_never_met() {
             external_halt: &no_halt,
             progress: &no_progress,
             emit_panel: &no_panel,
+            cancel: None,
         },
     )
     .await;
@@ -252,6 +254,7 @@ async fn loop_halts_on_cost_budget() {
             external_halt: &no_halt,
             progress: &no_progress,
             emit_panel: &no_panel,
+            cancel: None,
         },
     )
     .await;
@@ -341,6 +344,7 @@ async fn loop_drains_live_steer_into_next_plan_prompt() {
             external_halt: &no_halt,
             progress: &no_progress,
             emit_panel: &no_panel,
+            cancel: None,
         },
     )
     .await;
@@ -398,6 +402,7 @@ async fn loop_halts_when_external_blocked_timeout_is_signalled() {
             external_halt: &external_halt,
             progress: &no_progress,
             emit_panel: &no_panel,
+            cancel: None,
         },
     )
     .await;

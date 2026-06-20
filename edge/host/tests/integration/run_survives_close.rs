@@ -105,6 +105,7 @@ async fn a_run_in_flight_completes_after_the_window_is_closed() {
             external_halt: &no_halt,
             progress: &|_| {},
             emit_panel: &|_, _| {},
+            cancel: None,
         },
     )
     .await;

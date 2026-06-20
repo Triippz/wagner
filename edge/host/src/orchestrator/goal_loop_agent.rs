@@ -21,11 +21,20 @@ use crate::state::{ConsoleInput, HaltReason, Run};
 /// publishes facts through; one instance drives one run to completion.
 pub struct GoalLoopAgent {
     ctx: AgentContext,
+    /// 014 US1: cooperative cancel signal threaded into the loop (FR-013). `None`
+    /// for the non-cancellable path (the existing goal-loop-as-agent tests).
+    cancel: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 impl GoalLoopAgent {
     pub fn new(ctx: AgentContext) -> Self {
-        Self { ctx }
+        Self { ctx, cancel: None }
+    }
+
+    /// Thread a cooperative cancel signal into the loop (registry-supervised runs).
+    pub fn with_cancel(mut self, cancel: tokio::sync::watch::Receiver<bool>) -> Self {
+        self.cancel = Some(cancel);
+        self
     }
 
     /// Drive `run` to completion with `pool`, publishing every loop signal as a
@@ -72,6 +81,7 @@ impl GoalLoopAgent {
                 external_halt: &no_halt,
                 progress: &progress,
                 emit_panel: &emit_panel,
+                cancel: self.cancel.clone(),
             },
         )
         .await;

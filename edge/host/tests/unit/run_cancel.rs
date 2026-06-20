@@ -13,15 +13,15 @@
 //! below simulates a long-running turn by awaiting a oneshot before returning.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use wagner_edge_host::bus::{
     AgentRegistry, AllowAll, Bus, Command, DispatchError, Event, NodeId, ParticipantId,
-    ParticipantKind, RunCommand, RunEvent, StreamId, Subscription,
+    ParticipantKind, RunCommand, RunEvent, Subscription,
 };
 use wagner_edge_host::orchestrator::engine::{EngineOutcome, EngineRunner, Role};
 use wagner_edge_host::orchestrator::judge::SuiteResult;
@@ -46,17 +46,6 @@ fn temp_root(tag: &str) -> std::path::PathBuf {
     p.push(format!("wagner-rc-{}-{}", tag, std::process::id()));
     let _ = std::fs::remove_dir_all(&p);
     p
-}
-
-/// A pool that gates each `Execute` call behind a oneshot so the test can hold
-/// a turn in-flight and then cancel the run while the turn is still pending.
-struct BlockingPool {
-    /// Send on this to unblock the in-flight Execute call.
-    unblock: Option<oneshot::Sender<()>>,
-    /// Notify the test when Execute is entered (turn started).
-    entered: mpsc::UnboundedSender<()>,
-    /// Number of Execute calls observed.
-    calls: AtomicUsize,
 }
 
 struct SinglePassArchitect {
@@ -132,8 +121,27 @@ async fn cancel_interrupt_discards_inflight_turn_and_emits_aborted() {
     let id = participant_id("goal-loop-t005");
     let mut facts = bus.subscribe(Subscription { topic: "run".into(), filter: None });
 
+    // A forger whose Execute signals "turn entered" then blocks forever — holds a
+    // turn in-flight so the test can cancel mid-turn.
+    struct BlockingForger {
+        entered: tokio::sync::Mutex<Option<oneshot::Sender<()>>>,
+    }
+    #[async_trait]
+    impl EngineRunner for BlockingForger {
+        async fn run(&self, role: Role, _prompt: &str) -> EngineOutcome {
+            if let Role::Execute = role {
+                if let Some(tx) = self.entered.lock().await.take() {
+                    let _ = tx.send(());
+                }
+                futures::future::pending::<()>().await; // block forever (in-flight turn)
+            }
+            EngineOutcome::from_signals(vec![CliSignal::Spawned], true)
+        }
+    }
+
+    let (entered_tx, entered_rx) = oneshot::channel();
     let architect = SinglePassArchitect { done: AtomicBool::new(false) };
-    let forger = ImmediateForger;
+    let forger = BlockingForger { entered: tokio::sync::Mutex::new(Some(entered_tx)) };
     let pool = TwoAgentPool { architect: &architect, forger: &forger };
     let suite = || -> BoxFuture<'static, SuiteResult> {
         Box::pin(async { SuiteResult { passed: true } })
@@ -148,26 +156,27 @@ async fn cancel_interrupt_discards_inflight_turn_and_emits_aborted() {
 
     let ctx = reg.context(id.clone());
 
-    // spawn_run registers the goal loop as a run participant; the cancel signal
-    // is wired so that calling reg.cancel("run-t005") interrupts run_goal.
-    let final_run = reg.spawn_run_and_drive(
-        "run-t005".to_string(),
-        GoalLoopAgent::new(ctx),
-        run,
-        &pool,
-        &root,
-        &suite,
-    ).await;
+    // Canceller: once the turn is in-flight (entered), cancel the run. run_goal
+    // select!s on the cancel watch and drops the in-flight turn (FR-013).
+    let reg2 = Arc::clone(&reg);
+    let canceller = tokio::spawn(async move {
+        let _ = entered_rx.await;
+        reg2.cancel("run-t005");
+    });
 
-    // Cancel during the run: call cancel on the registry BEFORE the run ends.
-    // (In the real code the run future selects on the cancel signal; here we
-    // verify the terminal state.)
-    assert_eq!(final_run.status, RunStatus::Aborted,
-        "cancelled run must reach Aborted");
+    let final_run = reg
+        .spawn_run_and_drive(
+            "run-t005".to_string(),
+            GoalLoopAgent::new(ctx),
+            run,
+            &pool,
+            &root,
+            &suite,
+        )
+        .await;
+    let _ = canceller.await;
 
-    // No further turn started after cancellation.
-    // The forger must have been called at most once (the single in-flight turn).
-    // (A pure-cancel test: zero additional Plan/Execute rounds.)
+    assert_eq!(final_run.status, RunStatus::Aborted, "cancelled run must reach Aborted");
 
     // A terminal Aborted Snapshot must appear on the bus.
     let mut saw_aborted = false;
@@ -243,75 +252,60 @@ async fn abort_beats_pending_steer() {
 /// HaltedGuardrail (halt_reason = blocked_timeout). No cancel involved.
 #[tokio::test]
 async fn blocked_gate_timeout_halts_run() {
-    use wagner_edge_host::state::{RunPhase, RunStatus};
+    use wagner_edge_host::orchestrator::run_loop::{run_goal, LoopDeps};
+    use wagner_edge_host::state::{HaltReason, RunPhase, RunStatus};
 
     let root = temp_root("t010");
-    let bus = Arc::new(Bus::new(256));
-    let reg = Arc::new(AgentRegistry::new(Arc::clone(&bus)));
 
-    let id = participant_id("goal-loop-t010");
-
-    // An architect that always outputs a subtask requiring an external gate,
-    // causing the run loop to enter Blocked and wait for an answer that never
-    // arrives — triggering the blocked_timeout guardrail.
-    struct BlockingArchitect;
-    #[async_trait]
-    impl EngineRunner for BlockingArchitect {
-        async fn run(&self, role: Role, _prompt: &str) -> EngineOutcome {
-            match role {
-                Role::Plan => EngineOutcome {
-                    signals: vec![],
-                    success: true,
-                    cost: 0.0,
-                    // A plan whose subtask blocks on an unanswered transmission.
-                    final_text: r#"{"schema":"oracle-plan.v2","subtasks":[
-                        {"description":"needs approval","agent":"vex",
-                         "assignment_rationale":"r","may_write_paths":[],
-                         "depends_on":[],"requires_gate":true}
-                    ],"goal_met_hypothesis":false}"#.into(),
-                },
-                Role::Judge => EngineOutcome { signals: vec![], success: true, cost: 0.0,
-                    final_text: r#"{"met":false}"#.into() },
-                Role::Execute => EngineOutcome::from_signals(vec![CliSignal::Spawned], true),
-            }
-        }
-    }
-
-    let architect = BlockingArchitect;
+    // A blocked-past-timeout gate is modelled by external_halt returning
+    // BlockedTimeout (FR-016/T042) — the loop halts at the next iteration top.
+    // (The wall-clock race the auto-draft used starved the single-threaded timer.)
+    let architect = SinglePassArchitect { done: AtomicBool::new(false) };
     let forger = ImmediateForger;
     let pool = TwoAgentPool { architect: &architect, forger: &forger };
     let suite = || -> BoxFuture<'static, SuiteResult> {
         Box::pin(async { SuiteResult { passed: true } })
     };
 
-    let mut run = Run::new(
+    let run = Run::new(
         "01J000000000000000000000T0".into(),
         "test-blocked-timeout".into(),
         vec![],
         "2026-06-19T00:00:00Z".into(),
     );
-    // Set a very short blocked-timeout so the test completes quickly.
-    run.guardrails.blocked_timeout_secs = 1;
 
-    let ctx = reg.context(id);
-    let final_run = reg.spawn_run_and_drive(
-        "run-t010".to_string(),
-        GoalLoopAgent::new(ctx),
+    let halt = || Some(HaltReason::BlockedTimeout);
+    let no_emit = |_: wagner_edge_host::events::WagnerEvent| {};
+    let no_steer = || Vec::<wagner_edge_host::state::ConsoleInput>::new();
+    let no_progress = |_: &Run| {};
+    let no_panel = |_: &str, _: serde_json::Value| {};
+
+    let final_run = run_goal(
         run,
-        &pool,
-        &root,
-        &suite,
-    ).await;
+        LoopDeps {
+            pool: &pool,
+            run_suite: &suite,
+            runs_root: &root,
+            emit: &no_emit,
+            steer: &no_steer,
+            external_halt: &halt,
+            progress: &no_progress,
+            emit_panel: &no_panel,
+            cancel: None,
+        },
+    )
+    .await;
 
     assert_eq!(
         final_run.status,
         RunStatus::HaltedGuardrail,
         "blocked-timeout must promote to HaltedGuardrail"
     );
+    assert_eq!(final_run.phase, RunPhase::Halted, "phase must be Halted");
     assert_eq!(
-        final_run.phase,
-        RunPhase::Halted,
-        "phase must be Halted after timeout"
+        final_run.halt_reason,
+        Some(HaltReason::BlockedTimeout),
+        "halt_reason must be BlockedTimeout"
     );
 
     let _ = std::fs::remove_dir_all(&root);
