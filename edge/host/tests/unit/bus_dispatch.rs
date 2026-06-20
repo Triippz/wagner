@@ -79,3 +79,47 @@ fn backpressure_when_intake_is_full_and_undrained() {
         .expect_err("intake full");
     assert_eq!(err, DispatchError::Backpressure);
 }
+
+// ── T011 — reject: unauthorized or schema-invalid run-control command ──────────
+
+/// An unauthorized abort is denied at intake and never reaches a live run.
+#[test]
+fn unauthorized_abort_is_denied_at_intake() {
+    let bus = Bus::new(8);
+    let mut rx = bus.take_commands().expect("receiver");
+
+    let err = bus
+        .dispatch(Command::Run(RunCommand::Abort { run_id: Some("r1".into()) }), &DenyAll)
+        .expect_err("DenyAll must reject abort");
+    assert!(matches!(err, DispatchError::Denied(_)), "abort denied by policy: {err:?}");
+    assert!(rx.try_recv().is_err(), "denied abort never reaches the intake");
+}
+
+/// An unauthorized steer is denied at intake — no live run is affected.
+#[test]
+fn unauthorized_steer_is_denied_at_intake() {
+    let bus = Bus::new(8);
+    let mut rx = bus.take_commands().expect("receiver");
+
+    let err = bus
+        .dispatch(
+            Command::Run(RunCommand::Steer { run_id: "r1".into(), text: "pivot".into() }),
+            &DenyAll,
+        )
+        .expect_err("DenyAll must reject steer");
+    assert!(matches!(err, DispatchError::Denied(_)), "steer denied by policy: {err:?}");
+    assert!(rx.try_recv().is_err(), "denied steer never reaches the intake");
+}
+
+/// A schema-invalid JSON run-control payload is rejected before it can reach
+/// any live run, regardless of the authorizer.
+#[test]
+fn schema_invalid_run_control_rejected_at_boundary() {
+    let bus = Bus::new(8);
+    let _rx = bus.take_commands();
+
+    // Valid outer envelope type but wrong inner shape (no run_id, not a valid Command).
+    let bad = serde_json::json!({ "type": "run", "data": { "action": "explode" } });
+    let err = bus.dispatch_json(&bad, &AllowAll).expect_err("schema-invalid rejected");
+    assert!(matches!(err, DispatchError::Invalid(_)), "invalid payload rejected: {err:?}");
+}

@@ -86,11 +86,11 @@ export type RunEvent =
     }
   | {
       type: "snapshot";
-      data: unknown;
+      data: Run;
     }
   | {
       type: "activity";
-      data: unknown;
+      data: WagnerEvent;
     }
   | {
       type: "transmission";
@@ -104,6 +104,40 @@ export type RunEvent =
       type: "workflow_done";
       data: unknown;
     };
+export type RunStatus = "drafted" | "running" | "met" | "halted_guardrail" | "aborted" | "paused";
+export type CostMode = "cli_usage" | "wallclock";
+export type HaltReason = ("iterations" | "cost" | "blocked_timeout") | "misconfigured";
+export type SubtaskState = "queued" | "running" | "done" | "failed";
+/**
+ * Which engine an operative belongs to.
+ */
+export type Faction = "architects" | "forgers";
+/**
+ * The kind of work an operative is doing right now. Drives district + state.
+ */
+export type Activity =
+  | "read"
+  | "edit"
+  | "test"
+  | "build"
+  | "lint"
+  | "shell"
+  | "review"
+  | "diff"
+  | "judge"
+  | "plan"
+  | "decompose"
+  | "think"
+  | "await_permission"
+  | "await_question";
+/**
+ * One of the five zones on the operations floor.
+ */
+export type District = "stacks" | "forge" | "mirror" | "oracle" | "gate";
+/**
+ * The state ring shown around an operative.
+ */
+export type OperativeState = "idle" | "thinking" | "working" | "blocked";
 /**
  * Goal-namespace facts.
  */
@@ -136,8 +170,14 @@ export type VoiceEvent =
     }
   | {
       type: "download_progress";
-      data: unknown;
+      data: ModelProgress;
     };
+/**
+ * Persistent disk state visible to `models_status`. Transient states
+ * (`Downloading`, `Verifying`) are not stored — they only appear in live
+ * `ModelProgress` callbacks.
+ */
+export type ModelState = "absent" | "downloading" | "verifying" | "ready" | "failed";
 /**
  * UI-namespace facts.
  */
@@ -200,4 +240,123 @@ export interface ParticipantId {
 export interface Scope {
   user: string;
   workspace: string;
+}
+export interface Run {
+  schema: string;
+  run_id: string;
+  goal: string;
+  docs?: string[];
+  status: RunStatus;
+  /**
+   * Fine-grained live step (mission bar). Not persisted-critical; defaults to Idle.
+   */
+  phase?: "idle" | "planning" | "dispatching" | "judging" | "blocked" | "met" | "halted";
+  iteration?: number;
+  guardrails: Guardrails;
+  created_at: string;
+  halt_reason?: HaltReason | null;
+  subtasks?: Subtask[];
+  transmissions?: string[];
+  console_inputs?: ConsoleInput[];
+  /**
+   * The on-disk project directory the session's agents run in. Persisted so a
+   * closed session can be resumed (the pool is rebuilt against this cwd).
+   * Empty on legacy runs created before sessions existed.
+   */
+  project_dir?: string;
+  /**
+   * Human-readable session label for the rail (defaults to the folder name).
+   */
+  name?: string;
+  /**
+   * Last-saved timestamp — drives the session rail's newest-first ordering.
+   * Defaults to `created_at` for legacy runs.
+   */
+  updated_at?: string;
+  /**
+   * The session's goal thread — append-only. Seeded with the first goal at
+   * creation; `add_goal` appends and reactivates the session.
+   */
+  goals?: string[];
+  [k: string]: unknown;
+}
+export interface Guardrails {
+  /**
+   * Optional runaway-loop cap. `None` = run until goal-met (cost + blocked
+   * timeout remain the brakes).
+   */
+  max_iterations?: number | null;
+  iterations_used?: number;
+  blocked_timeout_secs: number;
+  cost: CostBudget;
+  [k: string]: unknown;
+}
+export interface CostBudget {
+  mode: CostMode;
+  budget?: number | null;
+  used?: number;
+  [k: string]: unknown;
+}
+export interface Subtask {
+  id: string;
+  /**
+   * The hired-roster agent id this subtask was dispatched to.
+   */
+  agent_id: string;
+  assignment_rationale?: string | null;
+  prompt: string;
+  state: SubtaskState;
+  worktree?: string | null;
+  result_summary?: string | null;
+  parent_event_ids?: string[];
+  [k: string]: unknown;
+}
+export interface ConsoleInput {
+  ts: string;
+  text: string;
+  [k: string]: unknown;
+}
+/**
+ * The normalized event emitted to the frontend.
+ */
+export interface WagnerEvent {
+  schema: string;
+  event_id: string;
+  run_id: string;
+  operative_id: string;
+  /**
+   * Display name of the hired agent (floor label). Defaults to the id.
+   */
+  operative_name?: string;
+  faction: Faction;
+  activity: Activity;
+  district: District;
+  state: OperativeState;
+  message?: string | null;
+  handoff_target_operative_id?: string | null;
+  ts: string;
+  [k: string]: unknown;
+}
+/**
+ * A single progress event emitted by `download_models`.
+ *
+ * Serialised by the shell into the `wagner://voice-download` Tauri event with
+ * keys `model` / `state` / `received` / `total` (camelCase intentionally not
+ * applied — the UI lane's contract uses these exact names).
+ */
+export interface ModelProgress {
+  /**
+   * Model id (matches `ModelDef::id`): `"stt"` | `"tts_model"` | `"tts_voices"`.
+   */
+  model: string;
+  state: ModelState;
+  /**
+   * Bytes received so far.
+   */
+  received: number;
+  /**
+   * Total bytes expected (`0` when unknown until download completes).
+   */
+  total: number;
+  [k: string]: unknown;
 }

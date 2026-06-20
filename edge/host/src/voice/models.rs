@@ -66,7 +66,7 @@ pub const MODELS: &[ModelDef] = &[
 /// Persistent disk state visible to `models_status`. Transient states
 /// (`Downloading`, `Verifying`) are not stored — they only appear in live
 /// `ModelProgress` callbacks.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelState {
     Absent,
@@ -96,7 +96,7 @@ impl std::fmt::Display for ModelState {
 /// Serialised by the shell into the `wagner://voice-download` Tauri event with
 /// keys `model` / `state` / `received` / `total` (camelCase intentionally not
 /// applied — the UI lane's contract uses these exact names).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ModelProgress {
     /// Model id (matches `ModelDef::id`): `"stt"` | `"tts_model"` | `"tts_voices"`.
     pub model: String,

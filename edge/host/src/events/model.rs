@@ -1,10 +1,11 @@
 //! Normalized event model — the single event type the host emits to the frontend.
 //! Mirrors `schemas/wagner-event.schema.json` (Article VII).
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The kind of work an operative is doing right now. Drives district + state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Activity {
     Read,
@@ -24,7 +25,7 @@ pub enum Activity {
 }
 
 /// One of the five zones on the operations floor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum District {
     Stacks,
@@ -35,7 +36,7 @@ pub enum District {
 }
 
 /// The state ring shown around an operative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OperativeState {
     Idle,
@@ -45,7 +46,7 @@ pub enum OperativeState {
 }
 
 /// Which engine an operative belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Faction {
     Architects,
@@ -53,7 +54,7 @@ pub enum Faction {
 }
 
 /// The normalized event emitted to the frontend.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WagnerEvent {
     pub schema: String,
     pub event_id: String,

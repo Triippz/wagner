@@ -1,9 +1,10 @@
 //! Run aggregate — the persisted state of one goal-loop execution.
 //! Mirrors `schemas/run-state.schema.json`.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Drafted,
@@ -14,7 +15,7 @@ pub enum RunStatus {
     Paused,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HaltReason {
     Iterations,
@@ -27,7 +28,7 @@ pub enum HaltReason {
 
 /// The fine-grained step the loop is in — surfaced live so the mission bar can
 /// show "what's happening right now" beyond the coarse `RunStatus`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunPhase {
     #[default]
@@ -40,7 +41,7 @@ pub enum RunPhase {
     Halted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CostMode {
     /// Usage reported by the CLI itself (preferred when available).
@@ -49,7 +50,7 @@ pub enum CostMode {
     Wallclock,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CostBudget {
     pub mode: CostMode,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,7 +59,7 @@ pub struct CostBudget {
     pub used: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Guardrails {
     /// Optional runaway-loop cap. `None` = run until goal-met (cost + blocked
     /// timeout remain the brakes).
@@ -87,7 +88,7 @@ impl Guardrails {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SubtaskState {
     Queued,
@@ -96,7 +97,7 @@ pub enum SubtaskState {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Subtask {
     pub id: String,
     /// The hired-roster agent id this subtask was dispatched to.
@@ -111,13 +112,13 @@ pub struct Subtask {
     pub parent_event_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ConsoleInput {
     pub ts: String,
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Run {
     pub schema: String,
     pub run_id: String,

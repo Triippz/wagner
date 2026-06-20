@@ -178,6 +178,12 @@ path = "tests/unit/bus_no_handle_guard.rs"
 name = "bus_additive_version"
 path = "tests/unit/bus_additive_version.rs"
 
+# 014 US2 — typed schema round-trip (Run / WagnerEvent / ModelProgress each
+# validate against their derived JSON Schema + serde round-trip, D-TEST-3).
+[[test]]
+name = "schema_roundtrip"
+path = "tests/unit/schema_roundtrip.rs"
+
 # 011 P1 — in-process bus runtime (publish/subscribe, per-stream seq, Lagged).
 [[test]]
 name = "bus_runtime"
@@ -192,3 +198,8 @@ path = "tests/unit/bus_dispatch.rs"
 [[test]]
 name = "bus_registry"
 path = "tests/unit/bus_registry.rs"
+
+# 014 US1 — run cancel, backpressure-abort, blocked-timeout halt (T005/T006/T010/T033).
+[[test]]
+name = "run_cancel"
+path = "tests/unit/run_cancel.rs"
