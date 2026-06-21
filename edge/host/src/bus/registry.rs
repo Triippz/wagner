@@ -311,9 +311,16 @@ impl AgentRegistry {
         let task = tokio::spawn(make_future(cancel_rx));
 
         self.running.lock().expect("registry not poisoned").insert(
-            run_id,
+            run_id.clone(),
             Entry::Run { task: Some(task), cancel_tx },
         );
+
+        // If a cancel raced this registration (arrived while the run was not yet in
+        // `running`, recorded as pending), deliver it now so the run can't outlive
+        // an abort that beat its spawn.
+        if self.pending_cancels.lock().expect("registry not poisoned").remove(&run_id) {
+            self.cancel(&run_id);
+        }
 
         Ok(())
     }
@@ -326,7 +333,11 @@ impl AgentRegistry {
     ///
     /// The Aborted snapshot is published inline so callers that do a `try_recv` drain
     /// observe it immediately (FR-006).
-    pub fn cancel(&self, run_id: &str) {
+    /// Returns `true` if a live run was found and cancelled, `false` if the run
+    /// was unknown/already-terminal (recorded as a pending cancel). Callers that
+    /// persist terminal state (the shell's `abort`) use this to avoid overwriting
+    /// a run that finished naturally between their snapshot and this call.
+    pub fn cancel(&self, run_id: &str) -> bool {
         let entry = self.running.lock().expect("registry not poisoned").remove(run_id);
         if let Some(Entry::Run { task, cancel_tx }) = entry {
             // Publish the terminal Aborted snapshot inline so callers that yield
@@ -342,6 +353,7 @@ impl AgentRegistry {
             // ponytail: not removing from steer_fns here — steer after cancel is valid
             // in T004; production steer on dead run is a no-op message delivery, harmless.
             eprintln!("[wagner] run cancelled: {run_id}");
+            true
         } else {
             // Pre-registration cancel (run not yet started) — record as pending so
             // spawn_run_and_drive returns Aborted immediately (T005, T006, T033).
@@ -352,6 +364,7 @@ impl AgentRegistry {
                 .insert(run_id.to_string());
             self.publish_aborted_snapshot(run_id);
             eprintln!("[wagner] run pre-cancelled (not yet live): {run_id}");
+            false
         }
     }
 
@@ -525,6 +538,19 @@ impl AgentRegistry {
     /// The names of all registered participants.
     pub fn running(&self) -> Vec<String> {
         self.running.lock().expect("registry not poisoned").keys().cloned().collect()
+    }
+
+    /// The run-ids of live **runs** only (excludes plain agents/connectors). The
+    /// shell's `steer`/`abort` target runs, so they must not count or cancel an
+    /// agent registered under the same registry (FR-004).
+    pub fn running_runs(&self) -> Vec<String> {
+        self.running
+            .lock()
+            .expect("registry not poisoned")
+            .iter()
+            .filter(|(_, entry)| matches!(entry, Entry::Run { .. }))
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 }
 

@@ -157,11 +157,20 @@ fn build_run_future(
             let cmd = suite_for_loop.clone();
             let cwd = suite_cwd.clone();
             Box::pin(async move {
-                tokio::task::spawn_blocking(move || {
+                match tokio::task::spawn_blocking(move || {
                     crate::suite::run_suite(cmd.as_deref(), &cwd)
                 })
                 .await
-                .unwrap_or(wagner_edge_host::orchestrator::judge::SuiteResult { passed: false })
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        // A JoinError means the suite thread PANICKED — distinct from
+                        // a normal red suite. Log it so a broken runner environment
+                        // isn't silently treated as "tests failed" and re-iterated.
+                        eprintln!("[wagner] suite runner panicked: {e}");
+                        wagner_edge_host::orchestrator::judge::SuiteResult { passed: false }
+                    }
+                }
             })
         };
         // Drain steering instructions submitted since the last iteration (US3).
@@ -203,7 +212,14 @@ fn build_run_future(
             },
         )
         .await;
-        gateway_for_loop.publish_run(&run_id, Event::Run(RunEvent::Snapshot(Box::new(final_run))));
+        // On cancel `run_goal` returns a MINIMAL Aborted run (blank goal/iteration);
+        // the registry and the shell's `abort` already publish the authoritative
+        // terminal snapshot, so publishing this one would race and could overwrite
+        // the full state with blanks. Only the loop's own terminal verdicts
+        // (Met/Halted) are published here.
+        if final_run.status != wagner_edge_host::state::RunStatus::Aborted {
+            gateway_for_loop.publish_run(&run_id, Event::Run(RunEvent::Snapshot(Box::new(final_run))));
+        }
         // Tear down the permission-gate server with the run (replaces RunControl).
         gate_server.abort();
     }
@@ -811,6 +827,9 @@ pub async fn start_workflow(
                 };
                 // Interrupt the workflow on abort (FR-013), then tear down the gate.
                 tokio::select! {
+                    // `wait_for` resolves when cancel flips to true; an Err (all
+                    // senders dropped — the registry tore the run down) is ALSO a
+                    // cancel. Either way this arm wins and `workflow_body` is dropped.
                     _ = async { let _ = cancel_rx.wait_for(|c| *c).await; } => {}
                     _ = workflow_body => {}
                 }
@@ -840,7 +859,7 @@ pub fn steer(
             id
         }
         None => {
-            let live = registry.running();
+            let live = registry.running_runs();
             match live.len() {
                 1 => live.into_iter().next().unwrap(),
                 0 => return Err("no active run".into()),
@@ -901,20 +920,30 @@ pub fn abort(
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("runs");
-    let live = registry.running();
+    let live = registry.running_runs();
     for id in abort_targets(&live, run_id.as_deref()) {
         // Deliver the abort directly to the registry — bypasses the bounded intake
         // so a saturated queue can never leave a run un-abortable (challenge C2).
         // cancel interrupts the loop's in-flight turn (FR-013) and publishes the
         // terminal Aborted snapshot (FR-006); the run future tears down its gate
-        // server on cancel.
-        registry.cancel(&id);
-        // Persist + emit the full aborted run so a reopened session reflects it and
-        // the rail leaves "running" (carries the B3 fix).
-        if let Ok(run) = wagner_edge_host::state::load(&runs_root, &id) {
-            let run = aborted(run);
-            let _ = wagner_edge_host::state::save(&runs_root, &run);
-            gateway.publish_run(&id, Event::Run(RunEvent::Snapshot(Box::new(run))));
+        // server on cancel. Only persist the aborted terminal when the run was
+        // actually live — a run that finished naturally between the snapshot above
+        // and now must not be mislabeled Aborted on disk.
+        if registry.cancel(&id) {
+            match wagner_edge_host::state::load(&runs_root, &id) {
+                Ok(run) => {
+                    let run = aborted(run);
+                    if let Err(e) = wagner_edge_host::state::save(&runs_root, &run) {
+                        eprintln!("[wagner] abort: state save failed for run {id}: {e}");
+                    }
+                    // The full, persisted aborted run (goal + iteration) is the last
+                    // word so the rail leaves "running" with correct detail.
+                    gateway.publish_run(&id, Event::Run(RunEvent::Snapshot(Box::new(run))));
+                }
+                Err(e) => {
+                    eprintln!("[wagner] abort: no persisted state for run {id} ({e}) — bus snapshot only");
+                }
+            }
         }
     }
     Ok(())
