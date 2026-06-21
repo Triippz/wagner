@@ -150,11 +150,14 @@ impl Entry {
 /// names held by live runs (T035).
 pub struct AgentRegistry {
     bus: Arc<Bus>,
-    running: Mutex<HashMap<String, Entry>>,
+    // `Arc<Mutex<…>>` (not bare `Mutex`) so a spawned run's task can hold a clone and
+    // deregister itself on natural completion — without this, `is_running` would stay
+    // true for finished runs and `add_goal`/`steer` would target a dead console.
+    running: Arc<Mutex<HashMap<String, Entry>>>,
     // ponytail: separate steer map so steer() works even after cancel() removes the run entry.
     // cancel() must deregister (is_running → false) but steer() on a just-cancelled run
     // should still deliver (T004 calls steer immediately after cancel, no yield between them).
-    steer_fns: Mutex<HashMap<String, SteerFn>>,
+    steer_fns: Arc<Mutex<HashMap<String, SteerFn>>>,
     // Pending cancels: cancel(run_id) called before spawn_run_and_drive registers the run.
     // spawn_run_and_drive checks this set first — if the run was pre-cancelled, it returns
     // Aborted immediately without driving the loop (T005, T006, T033 pattern).
@@ -169,8 +172,8 @@ impl AgentRegistry {
     pub fn new(bus: Arc<Bus>) -> Self {
         Self {
             bus,
-            running: Mutex::new(HashMap::new()),
-            steer_fns: Mutex::new(HashMap::new()),
+            running: Arc::new(Mutex::new(HashMap::new())),
+            steer_fns: Arc::new(Mutex::new(HashMap::new())),
             pending_cancels: Mutex::new(HashSet::new()),
             pending_steers: Mutex::new(HashMap::new()),
         }
@@ -306,9 +309,19 @@ impl AgentRegistry {
 
         // Build the run future, handing it the cancel receiver so its loop can
         // `select!` against cancellation and drop the in-flight turn (FR-013,
-        // kill_on_drop). cancel() sends on `cancel_tx` and publishes the terminal
-        // Aborted snapshot (FR-006).
-        let task = tokio::spawn(make_future(cancel_rx));
+        // kill_on_drop). Wrap it so the run self-deregisters on natural completion:
+        // without this, `is_running()` would stay true for a finished run and
+        // `add_goal`/`steer` would target a dead console. A cancelled run was already
+        // removed by `cancel()`, so that path's removes here are harmless no-ops.
+        let run_future = make_future(cancel_rx);
+        let running_for_cleanup = Arc::clone(&self.running);
+        let steer_fns_for_cleanup = Arc::clone(&self.steer_fns);
+        let cleanup_id = run_id.clone();
+        let task = tokio::spawn(async move {
+            run_future.await;
+            running_for_cleanup.lock().expect("registry not poisoned").remove(&cleanup_id);
+            steer_fns_for_cleanup.lock().expect("registry not poisoned").remove(&cleanup_id);
+        });
 
         self.running.lock().expect("registry not poisoned").insert(
             run_id.clone(),
@@ -317,8 +330,10 @@ impl AgentRegistry {
 
         // If a cancel raced this registration (arrived while the run was not yet in
         // `running`, recorded as pending), deliver it now so the run can't outlive
-        // an abort that beat its spawn.
-        if self.pending_cancels.lock().expect("registry not poisoned").remove(&run_id) {
+        // an abort that beat its spawn. Drop the pending_cancels guard BEFORE
+        // calling cancel() so no lock is held across that call.
+        let was_pending = self.pending_cancels.lock().expect("registry not poisoned").remove(&run_id);
+        if was_pending {
             self.cancel(&run_id);
         }
 
@@ -355,14 +370,16 @@ impl AgentRegistry {
             eprintln!("[wagner] run cancelled: {run_id}");
             true
         } else {
-            // Pre-registration cancel (run not yet started) — record as pending so
-            // spawn_run_and_drive returns Aborted immediately (T005, T006, T033).
-            // Also publish a snapshot so the bus reflects the abort (FR-006).
+            // Run not currently live. This is EITHER a pre-registration cancel (the
+            // run hasn't started — record it so spawn_run/spawn_run_and_drive deliver
+            // the abort when it does, and THAT path publishes the terminal) OR an
+            // abort that raced a run finishing naturally. We deliberately do NOT
+            // publish here: a blank Aborted snapshot would wrongly overwrite a run
+            // that just completed Met/Halted on the bus.
             self.pending_cancels
                 .lock()
                 .expect("registry not poisoned")
                 .insert(run_id.to_string());
-            self.publish_aborted_snapshot(run_id);
             eprintln!("[wagner] run pre-cancelled (not yet live): {run_id}");
             false
         }
@@ -406,7 +423,11 @@ impl AgentRegistry {
             .expect("registry not poisoned")
             .remove(&run_id);
         if pre_cancelled {
-            // Snapshot was already published by cancel(); just return the Aborted Run.
+            // A cancel arrived before the drive started (abort beats steer, FR-014).
+            // cancel() no longer publishes for the not-live case (it can't tell a
+            // pre-cancel from an abort racing natural completion), so publish the
+            // terminal Aborted snapshot here, on the path that knows the run is real.
+            self.publish_aborted_snapshot(&run_id);
             return make_aborted_run(&run_id);
         }
 
