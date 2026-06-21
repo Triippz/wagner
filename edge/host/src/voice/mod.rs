@@ -38,6 +38,9 @@
 //! | `router::{VoiceRouter, RouteRequest, EngineHandles}` | Engine selection |
 //! | `pipeline::{VoicePipeline, PipelineResult}` | STT→TTS sequencing |
 
+#[cfg(feature = "voice-io")]
+pub mod aec;
+pub mod cancel;
 pub mod http_stt;
 pub mod http_tts;
 pub mod manager;
@@ -56,6 +59,9 @@ pub use http_tts::HttpTts;
 // Re-export the domain types and router items at this level for test convenience.
 pub use router::{EngineHandles, RouteRequest, VoiceRouter};
 pub use types::{AudioChunk, SpeechChunk, Transcript, VoiceError};
+
+// Best-effort spoken-cancel matcher (015 FR-005a).
+pub use cancel::{classify_spoken, SpokenIntent};
 
 // VoiceManager and VoiceStatus re-exported at voice:: level for the shell layer.
 pub use manager::{VoiceManager, VoiceStatus};

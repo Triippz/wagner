@@ -98,4 +98,8 @@ pub enum VoiceError {
     /// The router could not select an engine for the given request.
     #[error("no engine matched for request: {0}")]
     NoEngineMatch(String),
+
+    /// The acoustic echo canceller failed to initialise or process a frame (015).
+    #[error("acoustic echo cancellation failed: {0}")]
+    AecFailed(String),
 }

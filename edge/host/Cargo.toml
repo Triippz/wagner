@@ -32,6 +32,16 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 similar = { workspace = true }
 
+# Voice native audio I/O (spec 015 Phase 2) — optional, behind the `voice-io`
+# feature so the default build + pure-logic CI lanes stay light. AEC3 via the
+# WebRTC APM (bundled/static, BSD-3-Clause; research R5). cpal/wake/VAD added as
+# their modules land.
+webrtc-audio-processing = { version = "2", features = ["bundled"], optional = true }
+
+[features]
+# Compiles the native-audio path (cpal capture/playback, AEC). Off by default.
+voice-io = ["dep:webrtc-audio-processing"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 
