@@ -447,7 +447,11 @@ impl AgentRegistry {
 
         // Register a cancel watch so cancel(run_id) can interrupt this inline drive:
         // run_goal select!s on the receiver and drops the in-flight turn on cancel
-        // (FR-013). There is no spawned task — task: None.
+        // (FR-013). There is no spawned task — task: None. No steer_fn is registered:
+        // this inline path is test-only and drives a `GoalLoopAgent`, which reads
+        // only steers pre-drained into `console_inputs` above (it runs with
+        // `no_steer`). Live mid-run steering is the shell's `spawn_run` path, whose
+        // loop drains the shared console each iteration.
         let (cancel_tx, cancel_rx) = watch::channel(false);
         self.running.lock().expect("registry not poisoned").insert(
             run_id.clone(),
