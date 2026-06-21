@@ -122,9 +122,9 @@ fold `RunManager` into the registry of running participants.
 `orchestrator::GoalLoopAgent` wraps `run_goal`, translating its emit/progress/panel callbacks
 into bus facts; a test drives a goal to **Met** with the deterministic fake `AgentPool` and
 asserts a terminal `Snapshot` fact (stamped with the goal-loop identity) reaches the bus.
-Abort-via-command works through P3's `dispatch`. Remaining integration (the shell adopting the
-registry to spawn the loop + folding `RunManager`) is additive — the registry it folds into now
-exists. `make verify` + `make accept` green.**
+Abort-via-command works through P3's `dispatch`. The shell adoption (folding `RunManager` onto the
+registry, the loop spawned + cancelled through it) was **completed in spec 014** (`75299f0`,
+`make verify` + `make accept` green). `make verify` + `make accept` green.**
 
 ### Step 5 — Parallel dispatch + backpressure ("30 at once")
 **Why:** the concurrency the platform needs — using logic that already exists but is

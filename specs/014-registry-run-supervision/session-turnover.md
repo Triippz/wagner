@@ -13,10 +13,14 @@
   - `GoalLoopAgent::with_cancel`.
   - Tests green: `bus_registry` (11), `goal_loop_agent` (2), `bus_dispatch` (8), `run_cancel` (4: T005 cancel-interrupt, T006, T010, T033). Full host suite + `make verify` green.
 
+## Update 2026-06-21 — shell rewire DONE (`75299f0`)
+
+The shell rewire below is **complete**; `make verify` + `make accept` (the `?mock` Playwright UI journey) are green. `RunManager`/`RunControl` deleted; `spawn_run_loop` → `build_run_future` + `register_run`; `spawn_run` now hands its future the cancel receiver; start/resume/add_goal/start_workflow/steer/abort route through `AgentRegistry`; `lib.rs` manages it. **Only `make gui-smoke` (native window, needs a workstation) + the follow-ups remain.** The step list below is retained as the record of what was done.
+
 ## Remaining
 
-### Shell rewire (T018–T021) — NOT started (reverted a partial attempt)
-Migrate `edge/shell/src/commands.rs` off `RunManager` onto `AgentRegistry`. It is **larger than a uniform swap** and **behaviorally unverifiable without `make gui-smoke`** (native window), which is why it was deferred to a workstation session.
+### Shell rewire (T018–T021) — DONE (see update above)
+Migrated `edge/shell/src/commands.rs` off `RunManager` onto `AgentRegistry`.
 
 Sites (line numbers at `8b711ee`):
 - `RunManager` (82) + `RunControl` (249) structs → delete.
