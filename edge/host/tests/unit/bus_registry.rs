@@ -205,7 +205,7 @@ async fn serve_commands_routes_abort_to_cancel_and_steer_to_steer() {
 
     reg.spawn_run(
         run_id.clone(),
-        {
+        |_cancel| {
             let run_id = run_id.clone();
             async move {
                 // probe: forward cancel/steer signals over channels for assertions
@@ -239,7 +239,7 @@ async fn spawn_run_rejects_duplicate_live_name() {
 
     reg.spawn_run(
         "run-dup".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("first spawn_run succeeds");
@@ -249,7 +249,7 @@ async fn spawn_run_rejects_duplicate_live_name() {
     let err = reg
         .spawn_run(
             "run-dup".to_string(),
-            futures::future::pending::<()>(),
+            |_cancel| futures::future::pending::<()>(),
             |_: String| {},
         )
         .expect_err("duplicate spawn_run must be rejected");
@@ -274,14 +274,14 @@ async fn cancel_one_run_leaves_other_running() {
 
     reg.spawn_run(
         "run-a".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("run-a spawns");
 
     reg.spawn_run(
         "run-b".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("run-b spawns");
@@ -314,7 +314,7 @@ async fn registry_cancel_emits_aborted_snapshot_on_bus() {
 
     reg.spawn_run(
         "run-t009".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("spawns");
@@ -355,7 +355,7 @@ async fn second_participant_registers_via_same_spawn_run_path() {
     // First run participant
     reg.spawn_run(
         "run-p1".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("first participant spawns");
@@ -363,7 +363,7 @@ async fn second_participant_registers_via_same_spawn_run_path() {
     // Second run participant — identical code path, different id
     reg.spawn_run(
         "run-p2".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("second participant spawns via same path");
@@ -391,7 +391,7 @@ async fn bare_spawn_cannot_silently_replace_live_run_keyed_participant() {
     // Register a run-keyed participant via the sanctioned path.
     reg.spawn_run(
         "run-guard".to_string(),
-        futures::future::pending::<()>(),
+        |_cancel| futures::future::pending::<()>(),
         |_: String| {},
     )
     .expect("spawn_run succeeds");

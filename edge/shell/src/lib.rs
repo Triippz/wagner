@@ -58,7 +58,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .manage(commands::RunManager::default())
         .manage(Arc::new(
             wagner_edge_host::transmissions::TransmissionRegistry::default(),
         ))
@@ -83,6 +82,12 @@ pub fn run() {
             // any run can publish.
             let bus = Arc::new(wagner_edge_host::bus::Bus::new(1024));
             bus_gateway::spawn(bus.clone(), app.handle().clone());
+            // 014 US1: the AgentRegistry is the single authority for live runs
+            // (replaces the shell's RunManager). Same bus as the UiGateway so the
+            // loop's published facts reach the UI.
+            app.manage(std::sync::Arc::new(
+                wagner_edge_host::bus::AgentRegistry::new(bus.clone()),
+            ));
             app.manage(bus_gateway::UiGateway::new(bus, app.handle().clone()));
 
             // System tray — the visible anchor when the window is hidden. Built

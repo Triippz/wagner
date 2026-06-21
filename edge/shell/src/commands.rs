@@ -16,7 +16,6 @@ use crate::voice_lifecycle::SidecarState;
 use wagner_edge_host::state::{ConsoleInput, Guardrails, Run};
 use wagner_edge_host::transmissions::TransmissionRegistry;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
@@ -73,16 +72,6 @@ pub async fn vault_graph(
     })
 }
 
-/// Per-run control handles held in Tauri-managed state — one live entry per run
-/// id, so multiple sessions run concurrently (a `start_run` no longer replaces a
-/// prior one). Finished runs' entries linger until app exit (a completed
-/// JoinHandle is cheap). ponytail: self-removal-on-complete needs an Arc'd map
-/// cloned into the task; add it only if many-runs-per-session memory matters.
-#[derive(Default)]
-pub struct RunManager {
-    runs: Mutex<HashMap<String, RunControl>>,
-}
-
 /// Which run ids to abort given an optional target: `Some(id)` → just that id (if
 /// live); `None` → every live run (the single-run UI sends no id today).
 fn abort_targets(live: &[String], target: Option<&str>) -> Vec<String> {
@@ -125,10 +114,14 @@ struct SpawnLoop {
     console: Arc<Mutex<Vec<ConsoleInput>>>,
 }
 
-/// Spawn the goal loop for one session on a background task and return its
-/// handle. The single source of truth for "run the loop" — shared by `start_run`
-/// and `resume_run` so the two never drift.
-fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
+/// Build the goal-loop future for one session (014 US1). The registry spawns it
+/// and hands it the cancel receiver so `run_goal` can interrupt the in-flight turn
+/// on abort (FR-013). The permission-gate server is torn down when the loop ends.
+fn build_run_future(
+    s: SpawnLoop,
+    gate_server: tauri::async_runtime::JoinHandle<()>,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
+) -> impl std::future::Future<Output = ()> + Send + 'static {
     let SpawnLoop {
         gateway,
         run,
@@ -146,7 +139,7 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
     let suite_for_loop = suite_command;
     let blocked_for_loop = blocked_halt;
     let suite_cwd = cwd.clone();
-    tauri::async_runtime::spawn(async move {
+    async move {
         // Build one CLI runner per hired agent: Claude agents get the US2 gate
         // and their skill prompt; Codex agents get theirs. The pool routes the
         // loop's plan/judge to the lead and each subtask to its assigned agent.
@@ -206,20 +199,39 @@ fn spawn_run_loop(s: SpawnLoop) -> tauri::async_runtime::JoinHandle<()> {
                 external_halt: &external_halt,
                 progress: &progress,
                 emit_panel: &emit_panel,
-                cancel: None,
+                cancel: Some(cancel_rx),
             },
         )
         .await;
         gateway_for_loop.publish_run(&run_id, Event::Run(RunEvent::Snapshot(Box::new(final_run))));
-    })
+        // Tear down the permission-gate server with the run (replaces RunControl).
+        gate_server.abort();
+    }
 }
 
-struct RunControl {
-    task: tauri::async_runtime::JoinHandle<()>,
-    /// The loopback permission server task (US2 gate). Aborted with the run.
+/// Register a run on the AgentRegistry (014 US1) — the single authority that
+/// replaces the shell's RunManager. start / resume / add_goal all funnel through
+/// here. The steer callback pushes live instructions into the shared console the
+/// loop drains each iteration (US3); abort routes via `registry.cancel` (FR-003).
+fn register_run(
+    registry: &Arc<wagner_edge_host::bus::AgentRegistry>,
+    run_id: String,
+    spawn_loop: SpawnLoop,
     gate_server: tauri::async_runtime::JoinHandle<()>,
-    /// Live steering inputs the loop drains each iteration.
-    console: Arc<Mutex<Vec<ConsoleInput>>>,
+) -> Result<(), String> {
+    let console = spawn_loop.console.clone();
+    registry
+        .spawn_run(
+            run_id,
+            move |cancel_rx| build_run_future(spawn_loop, gate_server, cancel_rx),
+            move |text: String| {
+                console.lock().unwrap().push(ConsoleInput {
+                    ts: chrono::Utc::now().to_rfc3339(),
+                    text,
+                });
+            },
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -307,7 +319,7 @@ pub fn validate_project_dir(project_dir: String) -> bool {
 #[tauri::command]
 pub async fn start_run(
     app: AppHandle,
-    mgr: State<'_, RunManager>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
     reg: State<'_, Arc<TransmissionRegistry>>,
     store: State<'_, MemoryStore>,
     gateway: State<'_, UiGateway>,
@@ -389,26 +401,22 @@ pub async fn start_run(
     )
     .await?;
 
-    let task = spawn_run_loop(SpawnLoop {
-        gateway: gateway.inner().clone(),
-        run,
-        roster,
-        cwd: project_cwd.clone(),
-        runs_root,
-        gate_config: gate.config.clone(),
-        suite_command,
-        blocked_halt,
-        console: console.clone(),
-    });
-
-    mgr.runs.lock().unwrap().insert(
+    register_run(
+        registry.inner(),
         run_id.clone(),
-        RunControl {
-            task,
-            gate_server: gate.server_task,
+        SpawnLoop {
+            gateway: gateway.inner().clone(),
+            run,
+            roster,
+            cwd: project_cwd.clone(),
+            runs_root,
+            gate_config: gate.config.clone(),
+            suite_command,
+            blocked_halt,
             console,
         },
-    );
+        gate.server_task,
+    )?;
     Ok(run_id)
 }
 
@@ -421,7 +429,7 @@ pub async fn start_run(
 #[tauri::command]
 pub async fn resume_run(
     app: AppHandle,
-    mgr: State<'_, RunManager>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
     reg: State<'_, Arc<TransmissionRegistry>>,
     gateway: State<'_, UiGateway>,
     run_id: String,
@@ -451,26 +459,22 @@ pub async fn resume_run(
     )
     .await?;
 
-    let task = spawn_run_loop(SpawnLoop {
-        gateway: gateway.inner().clone(),
-        run,
-        roster,
-        cwd: project_cwd,
-        runs_root,
-        gate_config: gate.config.clone(),
-        suite_command: None,
-        blocked_halt,
-        console: console.clone(),
-    });
-
-    mgr.runs.lock().unwrap().insert(
+    register_run(
+        registry.inner(),
         run_id,
-        RunControl {
-            task,
-            gate_server: gate.server_task,
+        SpawnLoop {
+            gateway: gateway.inner().clone(),
+            run,
+            roster,
+            cwd: project_cwd,
+            runs_root,
+            gate_config: gate.config.clone(),
+            suite_command: None,
+            blocked_halt,
             console,
         },
-    );
+        gate.server_task,
+    )?;
     Ok(())
 }
 
@@ -481,7 +485,7 @@ pub async fn resume_run(
 #[tauri::command]
 pub async fn add_goal(
     app: AppHandle,
-    mgr: State<'_, RunManager>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
     reg: State<'_, Arc<TransmissionRegistry>>,
     gateway: State<'_, UiGateway>,
     run_id: String,
@@ -490,16 +494,10 @@ pub async fn add_goal(
     if text.trim().is_empty() {
         return Err("goal must not be empty".into());
     }
-    // Is the session live right now? (Release the lock before any await.)
-    let is_live = mgr.runs.lock().unwrap().contains_key(&run_id);
-    if is_live {
-        let guard = mgr.runs.lock().unwrap();
-        if let Some(ctl) = guard.get(&run_id) {
-            ctl.console.lock().unwrap().push(ConsoleInput {
-                ts: chrono::Utc::now().to_rfc3339(),
-                text: format!("New goal: {}", text.trim()),
-            });
-        }
+    // Live session: inject the goal via the registry's steering path (the loop
+    // folds it into the next iteration). Closed session: resume to reactivate it.
+    if registry.is_running(&run_id) {
+        registry.steer(&run_id, format!("New goal: {}", text.trim()));
         return Ok(());
     }
     // Closed session: persist the appended goal, then resume to reactivate it.
@@ -515,7 +513,7 @@ pub async fn add_goal(
         now,
     );
     wagner_edge_host::state::save(&runs_root, &run).map_err(|e| e.to_string())?;
-    resume_run(app, mgr, reg, gateway, run_id).await
+    resume_run(app, registry, reg, gateway, run_id).await
 }
 
 /// The workflow templates for the builder's picker (decision #4): the built-in
@@ -640,7 +638,7 @@ pub fn validate_workflow(workflow: Workflow) -> Result<(), String> {
 #[tauri::command]
 pub async fn start_workflow(
     app: AppHandle,
-    mgr: State<'_, RunManager>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
     reg: State<'_, Arc<TransmissionRegistry>>,
     store: State<'_, MemoryStore>,
     gateway: State<'_, UiGateway>,
@@ -669,7 +667,6 @@ pub async fn start_workflow(
     )?;
 
     let run_id = ulid::Ulid::new().to_string();
-    let console = Arc::new(Mutex::new(Vec::<ConsoleInput>::new()));
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let suite_command = guardrails.suite_command.clone();
     // Each node is one step; reuse the iteration cap as the step ceiling (fix-loops
@@ -696,8 +693,14 @@ pub async fn start_workflow(
     let cwd = project_cwd.clone();
     let suite_cwd = project_cwd.clone();
     let run_id_for_task = run_id.clone();
+    let gate_server = gate.server_task;
 
-    let task = tauri::async_runtime::spawn(async move {
+    registry
+        .inner()
+        .spawn_run(
+            run_id.clone(),
+            move |mut cancel_rx| async move {
+                let workflow_body = async {
         let pool = CliAgentPool::build(&roster, &cwd, &gate_config);
 
         // Stage-level human gate: open a transmission, publish it, await the answer.
@@ -805,17 +808,17 @@ pub async fn start_workflow(
             }),
         });
         gateway_for_task.publish_run(&run_id_for_task, Event::Run(RunEvent::WorkflowDone(done)));
-    });
-
-    // Register this run alongside any others (concurrent sessions) — keyed by id.
-    mgr.runs.lock().unwrap().insert(
-        run_id.clone(),
-        RunControl {
-            task,
-            gate_server: gate.server_task,
-            console,
-        },
-    );
+                };
+                // Interrupt the workflow on abort (FR-013), then tear down the gate.
+                tokio::select! {
+                    _ = async { let _ = cancel_rx.wait_for(|c| *c).await; } => {}
+                    _ = workflow_body => {}
+                }
+                gate_server.abort();
+            },
+            |_text: String| {}, // workflows do not steer
+        )
+        .map_err(|e| e.to_string())?;
     Ok(run_id)
 }
 
@@ -823,25 +826,29 @@ pub async fn start_workflow(
 /// the loop drains the queue each iteration.
 #[tauri::command]
 pub fn steer(
-    mgr: State<'_, RunManager>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
     run_id: Option<String>,
     text: String,
 ) -> Result<(), String> {
-    let guard = mgr.runs.lock().unwrap();
     // Target the named session; with no id, target the sole live run (the
     // single-session UI sends none). Refuse to guess when several are live.
-    let ctl = match run_id {
-        Some(id) => guard.get(&id).ok_or_else(|| format!("no run with id {id}"))?,
-        None => match guard.len() {
-            1 => guard.values().next().unwrap(),
-            0 => return Err("no active run".into()),
-            _ => return Err("multiple active runs; specify run_id".into()),
-        },
+    let target = match run_id {
+        Some(id) => {
+            if !registry.is_running(&id) {
+                return Err(format!("no run with id {id}"));
+            }
+            id
+        }
+        None => {
+            let live = registry.running();
+            match live.len() {
+                1 => live.into_iter().next().unwrap(),
+                0 => return Err("no active run".into()),
+                _ => return Err("multiple active runs; specify run_id".into()),
+            }
+        }
     };
-    ctl.console.lock().unwrap().push(ConsoleInput {
-        ts: chrono::Utc::now().to_rfc3339(),
-        text,
-    });
+    registry.steer(&target, text);
     Ok(())
 }
 
@@ -879,7 +886,7 @@ fn aborted(mut run: Run) -> Run {
 #[tauri::command]
 pub fn abort(
     app: AppHandle,
-    mgr: State<'_, RunManager>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
     gateway: State<'_, UiGateway>,
     run_id: Option<String>,
 ) -> Result<(), String> {
@@ -894,15 +901,16 @@ pub fn abort(
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("runs");
-    let mut guard = mgr.runs.lock().unwrap();
-    let live: Vec<String> = guard.keys().cloned().collect();
+    let live = registry.running();
     for id in abort_targets(&live, run_id.as_deref()) {
-        if let Some(ctl) = guard.remove(&id) {
-            ctl.task.abort();
-            ctl.gate_server.abort();
-        }
-        // Announce the stop: load the persisted run, mark it aborted, persist,
-        // and emit `wagner://run` so the reducer transitions out of "running".
+        // Deliver the abort directly to the registry — bypasses the bounded intake
+        // so a saturated queue can never leave a run un-abortable (challenge C2).
+        // cancel interrupts the loop's in-flight turn (FR-013) and publishes the
+        // terminal Aborted snapshot (FR-006); the run future tears down its gate
+        // server on cancel.
+        registry.cancel(&id);
+        // Persist + emit the full aborted run so a reopened session reflects it and
+        // the rail leaves "running" (carries the B3 fix).
         if let Ok(run) = wagner_edge_host::state::load(&runs_root, &id) {
             let run = aborted(run);
             let _ = wagner_edge_host::state::save(&runs_root, &run);

@@ -275,14 +275,15 @@ impl AgentRegistry {
     ///
     /// When the run finishes (future resolves OR `cancel` is called) the entry is
     /// removed from the supervised set and a terminal snapshot is published.
-    pub fn spawn_run<F, S>(
+    pub fn spawn_run<F, Fut, S>(
         &self,
         run_id: String,
-        future: F,
+        make_future: F,
         steer_fn: S,
     ) -> Result<(), RegistryError>
     where
-        F: std::future::Future<Output = ()> + Send + 'static,
+        F: FnOnce(tokio::sync::watch::Receiver<bool>) -> Fut,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
         S: Fn(String) + Send + Sync + 'static,
     {
         {
@@ -292,7 +293,7 @@ impl AgentRegistry {
             }
         }
 
-        let (cancel_tx, _cancel_rx) = watch::channel(false);
+        let (cancel_tx, cancel_rx) = watch::channel(false);
 
         // Keep the steer callback in a separate map that outlives cancel(). This
         // lets steer() deliver to a run that was just cancelled in the same async
@@ -303,14 +304,11 @@ impl AgentRegistry {
             .expect("registry not poisoned")
             .insert(run_id.clone(), Arc::new(steer_fn));
 
-        // Run the future on its own task. Cancellation is cooperative: cancel()
-        // aborts the task (at the next .await point, killing any in-flight turn
-        // via kill_on_drop — plan §1.2) and publishes the terminal Aborted snapshot
-        // directly so the abort is observable immediately (FR-006, FR-013).
-        // The cancel_tx is stored for future use by run_loop.rs (T016), which will
-        // select! against it so the in-flight CLI turn is interrupted before the
-        // next await.
-        let task = tokio::spawn(future);
+        // Build the run future, handing it the cancel receiver so its loop can
+        // `select!` against cancellation and drop the in-flight turn (FR-013,
+        // kill_on_drop). cancel() sends on `cancel_tx` and publishes the terminal
+        // Aborted snapshot (FR-006).
+        let task = tokio::spawn(make_future(cancel_rx));
 
         self.running.lock().expect("registry not poisoned").insert(
             run_id,
