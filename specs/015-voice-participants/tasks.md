@@ -12,7 +12,9 @@
 > - ✅ **Intake routing decision** — `edge/host/src/participants/voice_intake.rs` (`route_transcript`/`IntakeAction`/`to_command`, FR-005a/006/007). The pure routing; the capture→AEC→STT→dispatch wiring is deferred. Covers the logic half of T015/T016.
 > - ✅ **AEC3 (the #1 native risk) — DONE at the DSP level.** **T004 spike PASS**: `webrtc-audio-processing` `bundled` builds on macOS arm64 (needs meson+ninja — now installed). `edge/host/src/voice/aec.rs` (`EchoCanceller`, FR-011a) wraps APM AEC3, **2 tests green headless** (frame_len=160; processes a render+capture frame). Dep added **optional behind the `voice-io` feature** (T001/T003 partial) — default build unaffected (2.3s, clippy clean). Covers T004 + the DSP half of T009/T010. Frame-cadence corrected in research R5 (160-decoupled-from-512, not a 3×160 split).
 >
-> **Deferred (workstation/device-gated):** cpal capture/playback (real mic/speaker), wake.rs/vad.rs (ONNX deps — VAD headless-testable next, wake needs a trained model T042), the participant Agent impls (handle/subscribe + capture/playback/AEC wiring), shell shortcuts + bundling + notarization (T041), wake-word training (T042), UI (T040), and the manual gates (T046). These need real audio devices, mic permission, or a trained model.
+> **VAD (T028) — BLOCKED (not device-gated; a dep conflict):** `voice_activity_detector 0.2.1` needs `ort` rc.10 but the existing Kokoro `wagner-tts-sidecar` pins `ort ^2.0.0-rc.12` (one `ort` per workspace) → won't compile. Needs a pure-Rust/tract Silero VAD or an rc.12-compatible crate (research R2). AEC is unaffected (no `ort`).
+>
+> **Deferred (workstation/device-gated):** cpal capture/playback (real mic/speaker), wake.rs (needs a trained model T042), the participant Agent impls (handle/subscribe + capture/playback/AEC wiring), shell shortcuts + bundling + notarization (T041), wake-word training (T042), UI (T040), and the manual gates (T046). These need real audio devices, mic permission, or a trained model.
 
 ---
 

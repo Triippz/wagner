@@ -32,6 +32,17 @@ backed by adversarially-verified deep-research (the wake-word/VAD/cpal pass and 
   hysteresis-RMS gate (MCC ~0.11 — too crude for always-on, retained only as a degraded fallback).
 - **Caveat:** Pulls in the **ONNX-Runtime dylib** (the main bundling cost, R4); pins `ort 2.0.0-rc.10`
   (RC); single maintainer — bus-factor risk.
+- **⚠️ INTEGRATION BLOCKER (discovered 2026-06-21, not in the isolated research):**
+  `voice_activity_detector 0.2.1` is written against **`ort` rc.10**, but the existing
+  **`wagner-tts-sidecar` (Kokoro) already pins `ort ^2.0.0-rc.12`**. Cargo unifies to ONE `ort` per
+  workspace (rc.12), and rc.12 broke the API the VAD crate uses (`.view()` on `Shape`) → it does not
+  compile. Pinning `ort=rc.10` conflicts with tts-sidecar; bumping the VAD crate isn't possible (0.2.1
+  is latest). **`voice_activity_detector` is therefore unusable in this workspace as-is.**
+  **Revised VAD options (decide in the device session):** (a) a **pure-Rust / tract** Silero VAD (no
+  `ort`, mirrors how livekit-wakeword avoids this via ort-tract) — preferred, sidesteps the ort coupling
+  entirely; (b) an rc.12-compatible Silero crate (`silero-vad-rust`?); (c) align tts-sidecar + VAD on one
+  `ort` (risky — touches the working Kokoro sidecar); (d) the degraded RMS-gate fallback. **AEC is
+  unaffected** — `webrtc-audio-processing` uses no `ort`.
 
 ## R3 — cpal capture/playback pattern
 
