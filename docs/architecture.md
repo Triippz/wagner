@@ -121,7 +121,7 @@ flowchart TD
 
 | Pillar | Where | What |
 |---|---|---|
-| **Sessions** | `orchestrator/`, `state/`, shell `commands.rs` | Durable, concurrent, resumable autonomous runs. A `Run` *is* a session. `RunManager` keys live runs; events carry `run_id`. The goal loop drives a pluggable `AgentPool` trait (→ deterministic tests with a fake agent). |
+| **Sessions** | `orchestrator/`, `state/`, shell `commands.rs` | Durable, concurrent, resumable autonomous runs. A `Run` *is* a session. A `bus::AgentRegistry` supervises live runs — start/abort/steer route through it; events carry `run_id`. The goal loop drives a pluggable `AgentPool` trait (→ deterministic tests with a fake agent). |
 | **Vault** | `vault/` | Local knowledge base over `.wagner/memory`: frontmatter + a **deterministic** wikilink parser, typed links, backlinks, tiered retrieval, `_staging/` approval gate. |
 | **Graph** | UI (React Flow) + `vault_graph` IPC | Visual browser of the vault graph; Console/Vault view tabs. |
 | **Sync** | `vault/{crdt,projector,sync_adapter,snapshot_store}` | Distributed v1: **loro** CRDT per note + **iroh** gossip/docs + a file↔CRDT **projector**. The projector race (Obsidian write ↔ remote merge) is the hard part — guarded by CAS on last-projected hash. |
