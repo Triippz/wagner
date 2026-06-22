@@ -11,7 +11,15 @@
 //! 2. Otherwise it is **free-form**: a **focused run** → [`IntakeAction::Steer`];
 //!    no focused run → [`IntakeAction::StartRun`].
 
-use crate::bus::{Command, RunCommand};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+
+use crate::bus::{
+    Agent, AgentContext, AgentError, Command, CommandAuthorizer, Envelope, Event, RunCommand,
+    RunEvent, Subscription, VoiceEvent,
+};
+use crate::state::RunStatus;
 use crate::voice::{classify_spoken, SpokenIntent};
 
 /// What a transcript routes to. The participant maps `Cancel` to `registry.cancel`
@@ -55,6 +63,98 @@ impl IntakeAction {
                 Some(Command::Run(RunCommand::Steer { run_id: run_id.clone(), text: text.clone() }))
             }
         }
+    }
+}
+
+/// The intake participant: turns transcripts into bus actions. The capture→AEC→STT
+/// half is device-gated and publishes a `voice.utterance_transcribed` event; this
+/// Agent subscribes to it, applies the pure [`route_transcript`] decision, and acts
+/// through the validated `dispatch` path. It also tracks the focused (live) run from
+/// run snapshots so a free-form utterance knows whether to start or steer.
+pub struct VoiceIntake {
+    ctx: AgentContext,
+    authz: Arc<dyn CommandAuthorizer>,
+    /// The live run a free-form utterance steers, and the target of a spoken cancel.
+    /// ponytail: single-session heuristic — the one Running/Paused run is the focus.
+    /// Replace with an explicit UI focus signal when multi-run focus actually lands.
+    focused_run: Option<String>,
+}
+
+impl VoiceIntake {
+    pub fn new(ctx: AgentContext, authz: Arc<dyn CommandAuthorizer>) -> Self {
+        Self { ctx, authz, focused_run: None }
+    }
+
+    /// The currently focused run, if any (test/observability aid).
+    pub fn focused_run(&self) -> Option<&str> {
+        self.focused_run.as_deref()
+    }
+
+    /// Route a transcript and act on the bus (FR-005a/006/007).
+    fn act_on_transcript(&self, transcript: &str) -> Result<(), AgentError> {
+        match route_transcript(transcript, self.focused_run.as_deref()) {
+            IntakeAction::Cancel => {
+                // Best-effort spoken cancel (council): dispatch `run.abort` for the
+                // focused run (`None` ⇒ the single live session). A dispatch failure is
+                // swallowed on purpose — the spoken path never promises delivery; the
+                // *deterministic* abort guarantee lives on the physical control (US3).
+                let _ = self.ctx.dispatch(
+                    Command::Run(RunCommand::Abort { run_id: self.focused_run.clone() }),
+                    self.authz.as_ref(),
+                );
+                Ok(())
+            }
+            // Free-form → a validated start/steer through the one authorized intake.
+            // Here a dispatch error (backpressure/denied) is a real failure, surfaced.
+            action => match action.to_command() {
+                Some(cmd) => self
+                    .ctx
+                    .dispatch(cmd, self.authz.as_ref())
+                    .map(|_| ())
+                    .map_err(|e| AgentError::Other(e.to_string())),
+                None => Ok(()),
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl Agent for VoiceIntake {
+    fn name(&self) -> &str {
+        "voice-intake"
+    }
+
+    fn subscriptions(&self) -> Vec<Subscription> {
+        vec![
+            // Transcripts produced by the (device-gated) capture→STT pipeline.
+            Subscription { topic: "voice".into(), filter: None },
+            // Run snapshots/finishes — which run a free-form utterance steers (EC-007).
+            Subscription { topic: "run".into(), filter: None },
+        ]
+    }
+
+    async fn handle(&mut self, envelope: &Envelope) -> Result<(), AgentError> {
+        match &envelope.payload {
+            Event::Voice(VoiceEvent::UtteranceTranscribed { text }) => {
+                self.act_on_transcript(text)?;
+            }
+            // Re-check liveness from the run's own state (EC-007): a live run becomes
+            // the focus; a terminal snapshot of the focused run clears it.
+            Event::Run(RunEvent::Snapshot(run)) => {
+                if matches!(run.status, RunStatus::Running | RunStatus::Paused) {
+                    self.focused_run = Some(run.run_id.clone());
+                } else if self.focused_run.as_deref() == Some(run.run_id.as_str()) {
+                    self.focused_run = None;
+                }
+            }
+            Event::Run(RunEvent::Finished { run_id, .. }) => {
+                if self.focused_run.as_deref() == Some(run_id.as_str()) {
+                    self.focused_run = None;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 
@@ -108,5 +208,93 @@ mod tests {
             IntakeAction::Steer { run_id: "r".into(), text: "t".into() }.to_command(),
             Some(Command::Run(RunCommand::Steer { run_id: "r".into(), text: "t".into() }))
         );
+    }
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+    use crate::bus::{
+        AgentRegistry, AllowAll, Bus, CommandEnvelope, NodeId, ParticipantId, ParticipantKind,
+        StreamId,
+    };
+    use crate::state::Run;
+    use tokio::sync::mpsc;
+
+    fn pid() -> ParticipantId {
+        ParticipantId {
+            node: NodeId("local".into()),
+            kind: ParticipantKind::Agent,
+            name: "voice-intake".into(),
+            instance: "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap(),
+        }
+    }
+
+    /// An intake plus the receiver draining the commands it dispatches (the bus
+    /// command-intake channel — what `dispatch` enqueues, FR-008).
+    fn intake_with_cmds() -> (VoiceIntake, mpsc::Receiver<CommandEnvelope>) {
+        let bus = Arc::new(Bus::new(16));
+        let cmds = bus.take_commands().expect("first take of command intake");
+        let ctx = AgentRegistry::new(Arc::clone(&bus)).context(pid());
+        (VoiceIntake::new(ctx, Arc::new(AllowAll)), cmds)
+    }
+
+    /// Mint a well-formed envelope around `payload` — only the payload matters to
+    /// `handle` (the throwaway bus has no subscribers; the publish is dropped).
+    fn env(payload: Event) -> Envelope {
+        AgentRegistry::new(Arc::new(Bus::new(4)))
+            .context(pid())
+            .publish(StreamId::Workspace("test".into()), payload)
+    }
+
+    fn live_run(id: &str) -> Run {
+        let mut r = Run::new(id.into(), "goal".into(), vec![], "2026-01-01T00:00:00Z".into());
+        r.status = RunStatus::Running;
+        r
+    }
+
+    fn transcribed(text: &str) -> Event {
+        Event::Voice(VoiceEvent::UtteranceTranscribed { text: text.into() })
+    }
+
+    #[tokio::test]
+    async fn no_focus_utterance_dispatches_start() {
+        let (mut intake, mut cmds) = intake_with_cmds();
+        intake.handle(&env(transcribed("research the landscape"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(cmd.command, Command::Run(RunCommand::Start { goal: "research the landscape".into() }));
+    }
+
+    #[tokio::test]
+    async fn focused_utterance_dispatches_steer() {
+        let (mut intake, mut cmds) = intake_with_cmds();
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(live_run("r7")))))).await.unwrap();
+        assert_eq!(intake.focused_run(), Some("r7"), "a live snapshot sets the focus");
+        intake.handle(&env(transcribed("use the other approach"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(
+            cmd.command,
+            Command::Run(RunCommand::Steer { run_id: "r7".into(), text: "use the other approach".into() })
+        );
+    }
+
+    #[tokio::test]
+    async fn spoken_cancel_dispatches_abort_for_focused_run() {
+        let (mut intake, mut cmds) = intake_with_cmds();
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(live_run("r7")))))).await.unwrap();
+        intake.handle(&env(transcribed("stop"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(cmd.command, Command::Run(RunCommand::Abort { run_id: Some("r7".into()) }));
+    }
+
+    #[tokio::test]
+    async fn finished_run_clears_focus_so_next_utterance_starts() {
+        let (mut intake, mut cmds) = intake_with_cmds();
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(live_run("r7")))))).await.unwrap();
+        intake.handle(&env(Event::Run(RunEvent::Finished { run_id: "r7".into(), ok: true }))).await.unwrap();
+        assert_eq!(intake.focused_run(), None, "a terminal finish clears the focus (EC-007)");
+        intake.handle(&env(transcribed("new task"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(cmd.command, Command::Run(RunCommand::Start { goal: "new task".into() }));
     }
 }

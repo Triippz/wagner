@@ -11,5 +11,5 @@ pub mod voice_projection;
 
 pub use scheduler::{ScheduledCommand, SchedulerAgent};
 pub use slack::{SlackConnector, SlackTransport};
-pub use voice_intake::{route_transcript, IntakeAction};
-pub use voice_projection::speakable_text;
+pub use voice_intake::{route_transcript, IntakeAction, VoiceIntake};
+pub use voice_projection::{speakable_text, VoiceProjection};
