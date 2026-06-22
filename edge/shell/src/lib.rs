@@ -61,7 +61,7 @@ pub fn run() {
         .manage(Arc::new(
             wagner_edge_host::transmissions::TransmissionRegistry::default(),
         ))
-        .manage(wagner_edge_host::voice::VoiceManager::new())
+        .manage(Arc::new(wagner_edge_host::voice::VoiceManager::new()))
         .manage(voice_lifecycle::SidecarState::new())
         .manage(commands::PttState::new())
         .setup(|app| {
@@ -86,9 +86,29 @@ pub fn run() {
             // 014 US1: the AgentRegistry is the single authority for live runs
             // (replaces the shell's RunManager). Same bus as the UiGateway so the
             // loop's published facts reach the UI.
-            app.manage(std::sync::Arc::new(
-                wagner_edge_host::bus::AgentRegistry::new(bus.clone()),
-            ));
+            let registry = Arc::new(wagner_edge_host::bus::AgentRegistry::new(bus.clone()));
+            // 015 T014b: register the voice intake participant — a published
+            // `voice.utterance_transcribed` → route_transcript → dispatch a RunCommand
+            // → RunCommandRouter → run. Shares the managed VoiceManager so the toggle
+            // gate (FR-015) + typed-error surfacing (FR-014) apply.
+            {
+                use wagner_edge_host::bus::{AllowAll, NodeId, ParticipantId, ParticipantKind};
+                let voice = app
+                    .state::<Arc<wagner_edge_host::voice::VoiceManager>>()
+                    .inner()
+                    .clone();
+                let ctx = registry.context(ParticipantId {
+                    node: NodeId("local".into()),
+                    kind: ParticipantKind::Agent,
+                    name: "voice-intake".into(),
+                    instance: ulid::Ulid::new(),
+                });
+                let intake =
+                    wagner_edge_host::participants::VoiceIntake::new(ctx, Arc::new(AllowAll), voice);
+                // `registry.spawn` uses `tokio::spawn` internally; enter the runtime.
+                tauri::async_runtime::block_on(async { registry.spawn(Box::new(intake)) });
+            }
+            app.manage(registry);
             app.manage(bus_gateway::UiGateway::new(bus, app.handle().clone()));
 
             // System tray — the visible anchor when the window is hidden. Built

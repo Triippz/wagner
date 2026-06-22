@@ -107,14 +107,16 @@ pub fn project(event: &Event) -> Option<(&'static str, serde_json::Value)> {
 /// legacy Tauri channel. Survives a slow tick (`Lagged`); stops when the bus
 /// closes (app exit).
 pub fn spawn(bus: Arc<Bus>, app: AppHandle) {
-    // Drain the command intake so `dispatch` never backs up. In P3 dispatched
-    // commands are validated + authorized + recorded here; 011 P4 replaces this
-    // drain with the AgentRegistry that routes each command to a participant.
-    if let Some(mut commands) = bus.take_commands() {
+    // 011 P4 / ADR-0004: route dispatched commands to real run actions via the
+    // engine's `RunCommandRouter` + the shell's `RunLaunch` adapter — replacing the
+    // P3 log-only drain. This is what makes a bus-dispatched `RunCommand` (from the
+    // voice intake, or any future client/transport) actually start/steer/abort a run.
+    if let Some(commands) = bus.take_commands() {
+        let router = wagner_edge_host::orchestrator::RunCommandRouter::new(
+            std::sync::Arc::new(crate::commands::ShellRunLaunch::new(app.clone())),
+        );
         tauri::async_runtime::spawn(async move {
-            while let Some(cmd) = commands.recv().await {
-                eprintln!("[wagner-edge] command accepted: {:?}", cmd.command);
-            }
+            router.run(commands).await;
         });
     }
 

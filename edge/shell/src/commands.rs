@@ -9,7 +9,7 @@ use wagner_edge_host::orchestrator::{
     TestOutcome, Workflow,
 };
 use wagner_edge_host::memory::{MemoryInput, MemoryRecord, MemoryStore};
-use wagner_edge_host::bus::{Command, Event, RunCommand, RunEvent, UiEvent, VoiceEvent};
+use wagner_edge_host::bus::{Event, RunEvent, UiEvent, VoiceEvent};
 use wagner_edge_host::voice::stt::Stt;
 use crate::bus_gateway::UiGateway;
 use crate::pool::CliAgentPool;
@@ -1006,12 +1006,10 @@ pub fn abort(
     gateway: State<'_, UiGateway>,
     run_id: Option<String>,
 ) -> Result<(), String> {
-    // Route the action through the validated command intake (011 P3). The effect
-    // (terminating the task) stays inline here until 011 P4 inverts it onto a
-    // participant; dispatch is the authz/audit chokepoint. Never block the abort
-    // itself on intake — a run must always be stoppable.
-    let _ = gateway.dispatch(Command::Run(RunCommand::Abort { run_id: run_id.clone() }));
-
+    // 011 P4 (ADR-0004): bus-dispatched aborts (e.g. voice spoken-cancel) now route
+    // through the `RunCommandRouter` → `registry.cancel`. The UI abort acts inline
+    // below directly (no bus dispatch) so a run is never cancelled twice. A run must
+    // always be stoppable, so this path never depends on the bounded intake.
     let runs_root = app
         .path()
         .app_data_dir()
@@ -1221,7 +1219,7 @@ pub async fn voice_download_models(
 /// IPC contract: `voice_status() -> { enabled: bool, ready: bool }`
 #[tauri::command]
 pub fn voice_status(
-    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+    vm: State<'_, Arc<wagner_edge_host::voice::VoiceManager>>,
 ) -> VoiceStatusDto {
     vm.status().into()
 }
@@ -1255,7 +1253,7 @@ impl Default for PttState {
 #[tauri::command]
 pub async fn voice_ptt_start(
     ptt: State<'_, PttState>,
-    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+    vm: State<'_, Arc<wagner_edge_host::voice::VoiceManager>>,
 ) -> Result<(), String> {
     if !vm.enabled() {
         return Err("voice is disabled — enable it in Voice settings first".into());
@@ -1275,7 +1273,8 @@ pub async fn voice_ptt_start(
 #[tauri::command]
 pub async fn voice_ptt_stop(
     ptt: State<'_, PttState>,
-    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+    vm: State<'_, Arc<wagner_edge_host::voice::VoiceManager>>,
+    registry: State<'_, Arc<wagner_edge_host::bus::AgentRegistry>>,
 ) -> Result<String, String> {
     // Take the capture out from under the lock before the await (no guard held
     // across the STT round-trip).
@@ -1290,7 +1289,23 @@ pub async fn voice_ptt_stop(
         vm.report_error(&e);
         e.to_string()
     })?;
-    Ok(transcript.text.trim().to_string())
+    let text = transcript.text.trim().to_string();
+    // Publish the utterance onto the bus so VoiceIntake routes it (start / steer /
+    // spoken-cancel) → RunCommandRouter → run. Also returned for the UI to display.
+    if !text.is_empty() {
+        use wagner_edge_host::bus::{NodeId, ParticipantId, ParticipantKind, StreamId};
+        let ctx = registry.context(ParticipantId {
+            node: NodeId("local".into()),
+            kind: ParticipantKind::Agent,
+            name: "voice-capture".into(),
+            instance: ulid::Ulid::new(),
+        });
+        ctx.publish(
+            StreamId::Workspace("voice".into()),
+            Event::Voice(VoiceEvent::UtteranceTranscribed { text: text.clone() }),
+        );
+    }
+    Ok(text)
 }
 
 /// Enable or disable the voice feature.
@@ -1316,7 +1331,7 @@ pub async fn voice_ptt_stop(
 pub async fn voice_set_enabled(
     on: bool,
     app: AppHandle,
-    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+    vm: State<'_, Arc<wagner_edge_host::voice::VoiceManager>>,
     sc: State<'_, SidecarState>,
 ) -> Result<VoiceStatusDto, String> {
     // Serialise enable/disable so concurrent calls can't both spawn (R3).
