@@ -63,6 +63,7 @@ pub fn run() {
         ))
         .manage(wagner_edge_host::voice::VoiceManager::new())
         .manage(voice_lifecycle::SidecarState::new())
+        .manage(commands::PttState::new())
         .setup(|app| {
             // Open (or create) the persistent memory store under the app-data dir.
             // Done synchronously (block_on) so the store is managed BEFORE any
@@ -190,6 +191,8 @@ pub fn run() {
             commands::vault_graph,
             commands::voice_status,
             commands::voice_set_enabled,
+            commands::voice_ptt_start,
+            commands::voice_ptt_stop,
             commands::voice_models_status,
             commands::voice_download_models,
         ])

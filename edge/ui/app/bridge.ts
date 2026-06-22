@@ -135,6 +135,10 @@ export const cmd = {
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   /** Enable or disable the voice engine; returns updated state. */
   voiceSetEnabled: (on: boolean) => invoke<VoiceStatus>("voice_set_enabled", { on }),
+  /** Begin a push-to-talk capture (button/key down). Errors if voice is disabled. */
+  voicePttStart: () => invoke<void>("voice_ptt_start"),
+  /** End a push-to-talk capture (button/key up); resolves to the recognised transcript. */
+  voicePttStop: () => invoke<string>("voice_ptt_stop"),
   /** Per-model download/readiness state for STT and TTS. */
   voiceModelsStatus: () =>
     invoke<{ stt: ModelState; tts: ModelState }>("voice_models_status"),

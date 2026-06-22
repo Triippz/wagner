@@ -10,6 +10,7 @@ use wagner_edge_host::orchestrator::{
 };
 use wagner_edge_host::memory::{MemoryInput, MemoryRecord, MemoryStore};
 use wagner_edge_host::bus::{Command, Event, RunCommand, RunEvent, UiEvent, VoiceEvent};
+use wagner_edge_host::voice::stt::Stt;
 use crate::bus_gateway::UiGateway;
 use crate::pool::CliAgentPool;
 use crate::voice_lifecycle::SidecarState;
@@ -1127,6 +1128,73 @@ pub fn voice_status(
     vm: State<'_, wagner_edge_host::voice::VoiceManager>,
 ) -> VoiceStatusDto {
     vm.status().into()
+}
+
+/// Push-to-talk capture state (015 US1, M2a). Holds the in-flight mic capture
+/// between the `voice_ptt_start`/`voice_ptt_stop` IPC calls, plus the STT adapter
+/// that transcribes the held utterance via the whisper sidecar (:8771).
+pub struct PttState {
+    capture: Mutex<Option<wagner_edge_host::voice::capture::MicCapture>>,
+    stt: wagner_edge_host::voice::HttpStt,
+}
+
+impl PttState {
+    pub fn new() -> Self {
+        Self {
+            capture: Mutex::new(None),
+            stt: wagner_edge_host::voice::HttpStt::new("http://127.0.0.1:8771"),
+        }
+    }
+}
+
+impl Default for PttState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Begin a push-to-talk capture (button/key down): open the mic and accumulate
+/// until `voice_ptt_stop`. Errors if voice is disabled or the mic is unavailable
+/// (the typed mic error is also surfaced via `VoiceStatus`).
+#[tauri::command]
+pub async fn voice_ptt_start(
+    ptt: State<'_, PttState>,
+    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+) -> Result<(), String> {
+    if !vm.enabled() {
+        return Err("voice is disabled — enable it in Voice settings first".into());
+    }
+    let mic = wagner_edge_host::voice::capture::MicCapture::start().map_err(|e| {
+        vm.report_error(&e);
+        e.to_string()
+    })?;
+    *ptt.capture.lock().unwrap() = Some(mic);
+    Ok(())
+}
+
+/// End a push-to-talk capture (button/key up): stop the mic, transcribe the held
+/// utterance via the whisper sidecar, and return the recognised text. M2a proves
+/// capture + STT on-device; M2b will publish the transcript onto the bus so it
+/// starts/steers a run.
+#[tauri::command]
+pub async fn voice_ptt_stop(
+    ptt: State<'_, PttState>,
+    vm: State<'_, wagner_edge_host::voice::VoiceManager>,
+) -> Result<String, String> {
+    // Take the capture out from under the lock before the await (no guard held
+    // across the STT round-trip).
+    let mic = ptt
+        .capture
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("no capture in progress")?;
+    let audio = mic.stop();
+    let transcript = ptt.stt.transcribe(audio).await.map_err(|e| {
+        vm.report_error(&e);
+        e.to_string()
+    })?;
+    Ok(transcript.text.trim().to_string())
 }
 
 /// Enable or disable the voice feature.

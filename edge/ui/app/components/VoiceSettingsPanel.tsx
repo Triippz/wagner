@@ -91,6 +91,10 @@ export function VoiceSettingsPanel({ onClose }: Props) {
   });
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Push-to-talk test (015 US1, M2a): hold to capture, release to transcribe.
+  const [recording, setRecording] = useState(false);
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [pttError, setPttError] = useState<string | null>(null);
 
   // Fetch initial status on mount — best-effort (non-Tauri/mock → stays absent).
   useEffect(() => {
@@ -145,6 +149,27 @@ export function VoiceSettingsPanel({ onClose }: Props) {
     cmd.voiceDownloadModels()
       .catch((e: unknown) => setError(String(e)))
       .finally(() => setDownloading(false));
+  }
+
+  // Optimistic recording flag: a quick tap may race the async start (the mic
+  // isn't open yet on release) and harmlessly report "no capture in progress" —
+  // a real hold (hundreds of ms) completes start before release. Fine for a test.
+  function startPtt() {
+    if (recording) return;
+    setPttError(null);
+    setRecording(true);
+    cmd.voicePttStart().catch((e: unknown) => {
+      setRecording(false);
+      setPttError(String(e));
+    });
+  }
+
+  function stopPtt() {
+    if (!recording) return;
+    setRecording(false);
+    cmd.voicePttStop()
+      .then((text) => setTranscript(text))
+      .catch((e: unknown) => setPttError(String(e)));
   }
 
   const showDownloadButton =
@@ -205,6 +230,31 @@ export function VoiceSettingsPanel({ onClose }: Props) {
           >
             Re-download
           </button>
+        )}
+
+        {allReady && (
+          <div className="voice-ptt-test" data-testid="voice-ptt-test">
+            <p className="voice-settings-lede">
+              Push-to-talk test: enable voice in the top bar and make sure the
+              sidecars are running, then hold the button and speak.
+            </p>
+            <button
+              className="btn"
+              data-variant={recording ? "danger" : "primary"}
+              data-testid="voice-ptt-btn"
+              onPointerDown={startPtt}
+              onPointerUp={stopPtt}
+              onPointerLeave={stopPtt}
+            >
+              {recording ? "Listening… release to transcribe" : "Hold to talk"}
+            </button>
+            {pttError && <div className="voice-settings-error">{pttError}</div>}
+            {transcript !== null && (
+              <div className="voice-ptt-transcript" data-testid="voice-ptt-transcript">
+                <strong>Heard:</strong> {transcript || "(nothing)"}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

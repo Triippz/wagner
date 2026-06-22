@@ -25,7 +25,8 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-wagner-edge-host = { path = "../host" }
+# voice-io enables the native-audio path (cpal mic capture for PTT, AEC).
+wagner-edge-host = { path = "../host", features = ["voice-io"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
