@@ -10506,6 +10506,7 @@ dependencies = [
 name = "wagner-edge-shell"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "futures",
  "objc2-app-kit",

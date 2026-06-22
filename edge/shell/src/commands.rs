@@ -359,6 +359,40 @@ pub async fn start_run(
         _ => Roster::default_roster(),
     };
     roster.validate().map_err(|e| e.to_string())?;
+    launch_run_core(
+        &app,
+        registry.inner(),
+        reg.inner(),
+        store.inner(),
+        gateway.inner(),
+        goal,
+        docs,
+        guardrails,
+        project_dir,
+        roster,
+    )
+    .await
+}
+
+/// The shared run-launch path (ADR-0004): resolve the workspace, fold recall into
+/// the goal, build the `Run`, start the permission gate, and register the goal loop
+/// on the `AgentRegistry`. Both the `start_run` command and the engine's
+/// `RunLaunch` adapter ([`ShellRunLaunch`]) funnel through here so the UI path and
+/// the bus/voice path never drift. `guardrails`/`roster` are already defaulted +
+/// validated by the caller.
+#[allow(clippy::too_many_arguments)]
+async fn launch_run_core(
+    app: &AppHandle,
+    registry: &Arc<wagner_edge_host::bus::AgentRegistry>,
+    reg: &Arc<TransmissionRegistry>,
+    store: &MemoryStore,
+    gateway: &UiGateway,
+    goal: String,
+    docs: Vec<String>,
+    guardrails: GuardrailConfig,
+    project_dir: String,
+    roster: Roster,
+) -> Result<String, String> {
     // Resolve the project directory the operatives run in — this is what makes
     // their per-project `claude`/`codex` settings (`.claude/`, AGENTS.md, MCP
     // servers) apply. Falls back to the app's cwd when left blank.
@@ -410,19 +444,19 @@ pub async fn start_run(
     // iteration and promotes the stall to a whole-run halt (T042/FR-016).
     let blocked_halt = Arc::new(AtomicBool::new(false));
     let gate = crate::gate::start_gate_server(
-        gateway.inner().clone(),
+        gateway.clone(),
         &app_data,
-        reg.inner().clone(),
+        reg.clone(),
         u64::from(run.guardrails.blocked_timeout_secs),
         blocked_halt.clone(),
     )
     .await?;
 
     register_run(
-        registry.inner(),
+        registry,
         run_id.clone(),
         SpawnLoop {
-            gateway: gateway.inner().clone(),
+            gateway: gateway.clone(),
             run,
             roster,
             cwd: project_cwd.clone(),
@@ -435,6 +469,68 @@ pub async fn start_run(
         gate.server_task,
     )?;
     Ok(run_id)
+}
+
+/// Shell adapter for the engine's `RunLaunch` port (ADR-0004). Lets a bus-dispatched
+/// `RunCommand` — from voice intake, or any future client/transport — start, steer,
+/// or abort a run through the *same* `launch_run_core`/registry path the UI uses.
+pub struct ShellRunLaunch {
+    app: AppHandle,
+}
+
+impl ShellRunLaunch {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+#[async_trait::async_trait]
+impl wagner_edge_host::orchestrator::RunLaunch for ShellRunLaunch {
+    async fn launch(&self, goal: String) -> Result<String, String> {
+        let registry = self.app.state::<Arc<wagner_edge_host::bus::AgentRegistry>>();
+        let reg = self.app.state::<Arc<TransmissionRegistry>>();
+        let store = self.app.state::<MemoryStore>();
+        let gateway = self.app.state::<UiGateway>();
+        // ponytail: a voice/bus-launched run has no folder picker — default to the
+        // app cwd (resolve_project_dir's blank fallback) + the default roster.
+        // Carry an explicit project_dir here once a client provides one (multi-run UX).
+        launch_run_core(
+            &self.app,
+            registry.inner(),
+            reg.inner(),
+            store.inner(),
+            gateway.inner(),
+            goal,
+            vec![],
+            GuardrailConfig::default(),
+            String::new(),
+            Roster::default_roster(),
+        )
+        .await
+    }
+
+    async fn steer(&self, run_id: String, text: String) -> Result<(), String> {
+        self.app
+            .state::<Arc<wagner_edge_host::bus::AgentRegistry>>()
+            .steer(&run_id, text);
+        Ok(())
+    }
+
+    async fn abort(&self, run_id: Option<String>) -> Result<(), String> {
+        let registry = self.app.state::<Arc<wagner_edge_host::bus::AgentRegistry>>();
+        match run_id {
+            Some(id) => {
+                registry.cancel(&id);
+            }
+            // `None` = the single live session (the UI/voice send no id) → every live run.
+            None => {
+                for id in registry.running_runs() {
+                    registry.cancel(&id);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Resume a persisted session (acceptance E6): load its state, rebuild the gate
