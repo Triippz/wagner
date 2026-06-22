@@ -129,6 +129,25 @@ mod tests {
         )
     }
 
+    // T018 / FR-012 / Article IX — privacy boundary. The persisted + syncable unit
+    // is the Run (run-state.schema.json, additionalProperties:false); raw voice
+    // audio/transcript streams must stay on the local bus and never ride along. A
+    // spoken *goal* is fine (it is a goal like any typed one). This locks the data
+    // model: adding an audio/transcript field to Run fails here. The full hub-sync
+    // guard (D-TEST-4) lands when the host gains a run-sync-to-hub path.
+    #[test]
+    fn run_state_contract_admits_no_raw_voice_field() {
+        let schema: serde_json::Value = serde_json::from_str(RUN_STATE_SCHEMA).unwrap();
+        let props = schema["properties"].as_object().expect("run-state schema has properties");
+        for key in props.keys() {
+            let k = key.to_lowercase();
+            assert!(
+                !(k.contains("audio") || k.contains("transcript") || k.contains("utterance") || k.contains("pcm")),
+                "privacy (FR-012): run-state contract must not carry a raw-voice field, found `{key}`"
+            );
+        }
+    }
+
     #[test]
     fn round_trips_session_fields() {
         let dir = tempfile::tempdir().unwrap();

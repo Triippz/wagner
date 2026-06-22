@@ -102,4 +102,8 @@ pub enum VoiceError {
     /// The acoustic echo canceller failed to initialise or process a frame (015).
     #[error("acoustic echo cancellation failed: {0}")]
     AecFailed(String),
+
+    /// Microphone capture was denied (no OS permission / device unavailable) (015, FR-014).
+    #[error("microphone access denied")]
+    MicDenied,
 }

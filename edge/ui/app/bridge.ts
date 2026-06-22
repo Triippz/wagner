@@ -124,11 +124,12 @@ export const cmd = {
     invoke<void>("answer_transmission", { id, response }),
   vaultGraph: (projectDir: string) =>
     invoke<VaultGraphDto>("vault_graph", { projectDir }),
-  /** Current voice-engine state. */
-  voiceStatus: () => invoke<{ enabled: boolean; ready: boolean }>("voice_status"),
+  /** Current voice-engine state. `last_error` is the most recent typed voice error (FR-014), or null. */
+  voiceStatus: () =>
+    invoke<{ enabled: boolean; ready: boolean; last_error?: string | null }>("voice_status"),
   /** Enable or disable the voice engine; returns updated state. */
   voiceSetEnabled: (on: boolean) =>
-    invoke<{ enabled: boolean; ready: boolean }>("voice_set_enabled", { on }),
+    invoke<{ enabled: boolean; ready: boolean; last_error?: string | null }>("voice_set_enabled", { on }),
   /** Per-model download/readiness state for STT and TTS. */
   voiceModelsStatus: () =>
     invoke<{ stt: ModelState; tts: ModelState }>("voice_models_status"),

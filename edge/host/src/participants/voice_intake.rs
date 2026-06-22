@@ -21,6 +21,7 @@ use crate::bus::{
     RunEvent, Subscription, VoiceEvent,
 };
 use crate::state::RunStatus;
+use crate::voice::manager::VoiceManager;
 use crate::voice::{classify_spoken, SpokenIntent};
 
 /// What a transcript routes to. The participant dispatches `RunCommand::Abort` for
@@ -80,6 +81,9 @@ impl IntakeAction {
 pub struct VoiceIntake {
     ctx: AgentContext,
     authz: Arc<dyn CommandAuthorizer>,
+    /// The live toggle (FR-015). Voice off ⇒ an in-flight transcript is dropped
+    /// without dispatch (EC-006: toggling off mid-capture submits nothing).
+    voice: Arc<VoiceManager>,
     /// The live run a free-form utterance steers, and the target of a spoken cancel.
     /// ponytail: single-session heuristic — the one Running/Paused run is the focus.
     /// Replace with an explicit UI focus signal when multi-run focus actually lands.
@@ -87,8 +91,8 @@ pub struct VoiceIntake {
 }
 
 impl VoiceIntake {
-    pub fn new(ctx: AgentContext, authz: Arc<dyn CommandAuthorizer>) -> Self {
-        Self { ctx, authz, focused_run: None }
+    pub fn new(ctx: AgentContext, authz: Arc<dyn CommandAuthorizer>, voice: Arc<VoiceManager>) -> Self {
+        Self { ctx, authz, voice, focused_run: None }
     }
 
     /// The currently focused run, if any (test/observability aid).
@@ -148,7 +152,9 @@ impl Agent for VoiceIntake {
 
     async fn handle(&mut self, envelope: &Envelope) -> Result<(), AgentError> {
         match &envelope.payload {
-            Event::Voice(VoiceEvent::UtteranceTranscribed { text }) => {
+            // FR-015 toggle gate / EC-006: voice off ⇒ drop an in-flight transcript
+            // without dispatching (run bookkeeping below still tracks focus).
+            Event::Voice(VoiceEvent::UtteranceTranscribed { text }) if self.voice.enabled() => {
                 self.act_on_transcript(text)?;
             }
             // Re-check liveness from the run's own state (EC-007): a live run becomes
@@ -250,13 +256,25 @@ mod agent_tests {
         }
     }
 
-    /// An intake plus the receiver draining the commands it dispatches (the bus
-    /// command-intake channel — what `dispatch` enqueues, FR-008).
-    fn intake_with_cmds() -> (VoiceIntake, mpsc::Receiver<CommandEnvelope>) {
+    /// An enabled manager (default is disabled) so the intake's toggle gate is open.
+    fn enabled_vm() -> Arc<VoiceManager> {
+        let vm = Arc::new(VoiceManager::new());
+        vm.set_enabled(true);
+        vm
+    }
+
+    /// An intake (with the given manager) plus the receiver draining the commands
+    /// it dispatches (the bus command-intake channel — what `dispatch` enqueues, FR-008).
+    fn intake_with(vm: Arc<VoiceManager>) -> (VoiceIntake, mpsc::Receiver<CommandEnvelope>) {
         let bus = Arc::new(Bus::new(16));
         let cmds = bus.take_commands().expect("first take of command intake");
         let ctx = AgentRegistry::new(Arc::clone(&bus)).context(pid());
-        (VoiceIntake::new(ctx, Arc::new(AllowAll)), cmds)
+        (VoiceIntake::new(ctx, Arc::new(AllowAll), vm), cmds)
+    }
+
+    /// The common case: voice enabled.
+    fn intake_with_cmds() -> (VoiceIntake, mpsc::Receiver<CommandEnvelope>) {
+        intake_with(enabled_vm())
     }
 
     /// Mint a well-formed envelope around `payload` — only the payload matters to
@@ -363,5 +381,26 @@ mod agent_tests {
         intake.handle(&env(transcribed("new task"))).await.unwrap();
         let cmd = cmds.try_recv().expect("a command was dispatched");
         assert_eq!(cmd.command, Command::Run(RunCommand::Start { goal: "new task".into() }));
+    }
+
+    // T020 / FR-015 + EC-006 — voice off ⇒ an in-flight transcript dispatches nothing.
+    #[tokio::test]
+    async fn disabled_voice_dispatches_no_command() {
+        // Default manager is disabled — the gate is closed.
+        let (mut intake, mut cmds) = intake_with(Arc::new(VoiceManager::new()));
+        intake.handle(&env(transcribed("research the landscape"))).await.unwrap();
+        assert!(cmds.try_recv().is_err(), "voice off ⇒ no command dispatched (EC-006)");
+    }
+
+    // EC-006 — toggling off after focus is tracked still submits nothing.
+    #[tokio::test]
+    async fn toggling_off_halts_dispatch_but_keeps_focus_bookkeeping() {
+        let vm = enabled_vm();
+        let (mut intake, mut cmds) = intake_with(Arc::clone(&vm));
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(live_run("r7")))))).await.unwrap();
+        vm.set_enabled(false); // toggle off mid-session
+        intake.handle(&env(transcribed("use the other approach"))).await.unwrap();
+        assert!(cmds.try_recv().is_err(), "after toggle-off, no steer is dispatched (EC-006)");
+        assert_eq!(intake.focused_run(), Some("r7"), "focus bookkeeping still tracks the live run");
     }
 }

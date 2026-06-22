@@ -18,6 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::bus::{Agent, AgentError, Envelope, Event, RunEvent, Subscription};
+use crate::voice::manager::VoiceManager;
 use crate::voice::tts::Tts;
 
 /// The projection allowlist (FR-009): the spoken text for a speakable event, or
@@ -38,11 +39,14 @@ pub fn speakable_text(event: &Event) -> Option<String> {
 /// synthesis, which is the full headless-testable surface of the allowlist.
 pub struct VoiceProjection {
     tts: Arc<dyn Tts>,
+    /// The live toggle + error sink (FR-015 / FR-014). Off ⇒ stay silent even
+    /// while run events flow; a TTS failure is surfaced via `report_error`.
+    voice: Arc<VoiceManager>,
 }
 
 impl VoiceProjection {
-    pub fn new(tts: Arc<dyn Tts>) -> Self {
-        Self { tts }
+    pub fn new(tts: Arc<dyn Tts>, voice: Arc<VoiceManager>) -> Self {
+        Self { tts, voice }
     }
 }
 
@@ -58,10 +62,16 @@ impl Agent for VoiceProjection {
     }
 
     async fn handle(&mut self, envelope: &Envelope) -> Result<(), AgentError> {
+        // FR-015 toggle gate: voice off ⇒ silent, even though run events keep flowing.
+        if !self.voice.enabled() {
+            return Ok(());
+        }
         if let Some(text) = speakable_text(&envelope.payload) {
             // ponytail: synthesise only — playback (cpal) is the device-gated half (T038).
             if let Err(e) = self.tts.synthesise(&text).await {
-                eprintln!("[wagner] voice-projection: tts synthesis failed: {e}");
+                // FR-014: surface the typed TTS-down error via VoiceStatus (no panic).
+                // `e` is already a `VoiceError` (often `TtsFailed`) — report it verbatim.
+                self.voice.report_error(&e);
             }
         }
         Ok(())
@@ -146,6 +156,27 @@ mod agent_tests {
         }
     }
 
+    /// A `Tts` that always fails — exercises the FR-014 error-surfacing path.
+    struct FailingTts;
+    #[async_trait]
+    impl Tts for FailingTts {
+        async fn synthesise(&self, _text: &str) -> Result<SpeechChunk, VoiceError> {
+            Err(VoiceError::TtsFailed("sidecar down".into()))
+        }
+    }
+
+    /// An enabled manager (the default is disabled) — the gate is open for the
+    /// allowlist tests that assert speech happens.
+    fn enabled_vm() -> Arc<VoiceManager> {
+        let vm = Arc::new(VoiceManager::new());
+        vm.set_enabled(true);
+        vm
+    }
+
+    fn run_complete() -> Event {
+        Event::Run(RunEvent::Finished { run_id: "r1".into(), ok: true })
+    }
+
     fn ctx(bus: &Arc<Bus>) -> AgentContext {
         AgentRegistry::new(Arc::clone(bus)).context(ParticipantId {
             node: NodeId("local".into()),
@@ -160,8 +191,10 @@ mod agent_tests {
         let phrases = Arc::new(Mutex::new(Vec::<String>::new()));
         let bus = Arc::new(Bus::new(16));
         let ctx = ctx(&bus);
-        let mut proj =
-            VoiceProjection::new(Arc::new(CapturingTts { phrases: Arc::clone(&phrases) }));
+        let mut proj = VoiceProjection::new(
+            Arc::new(CapturingTts { phrases: Arc::clone(&phrases) }),
+            enabled_vm(),
+        );
 
         for ev in [
             Event::Run(RunEvent::Finished { run_id: "r1".into(), ok: true }),
@@ -183,7 +216,8 @@ mod agent_tests {
         let calls = Arc::new(AtomicU32::new(0));
         let bus = Arc::new(Bus::new(16));
         let ctx = ctx(&bus);
-        let mut proj = VoiceProjection::new(Arc::new(CountingTts { calls: Arc::clone(&calls) }));
+        let mut proj =
+            VoiceProjection::new(Arc::new(CountingTts { calls: Arc::clone(&calls) }), enabled_vm());
 
         for ev in [
             Event::Run(RunEvent::WorkflowStep(json!({}))),
@@ -192,5 +226,57 @@ mod agent_tests {
             proj.handle(&ctx.publish(StreamId::Run("r1".into()), ev)).await.unwrap();
         }
         assert_eq!(calls.load(Ordering::SeqCst), 0, "non-allowlisted run events stay silent (SC-004)");
+    }
+
+    // T020 / FR-015 + EC-006 — the toggle gate: voice off ⇒ silent on an event
+    // that would otherwise be spoken.
+    #[tokio::test]
+    async fn disabled_voice_stays_silent_on_allowlisted_event() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let bus = Arc::new(Bus::new(16));
+        let ctx = ctx(&bus);
+        // Default manager is *disabled* — do not enable it.
+        let vm = Arc::new(VoiceManager::new());
+        let mut proj =
+            VoiceProjection::new(Arc::new(CountingTts { calls: Arc::clone(&calls) }), vm);
+
+        proj.handle(&ctx.publish(StreamId::Run("r1".into()), run_complete())).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "voice off ⇒ no TTS even for an allowlisted event");
+    }
+
+    // EC-006 — toggling off mid-stream halts: an allowlisted event after the
+    // toggle flips off produces no speech.
+    #[tokio::test]
+    async fn toggling_off_mid_stream_halts_speech() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let bus = Arc::new(Bus::new(16));
+        let ctx = ctx(&bus);
+        let vm = enabled_vm();
+        let mut proj =
+            VoiceProjection::new(Arc::new(CountingTts { calls: Arc::clone(&calls) }), Arc::clone(&vm));
+
+        proj.handle(&ctx.publish(StreamId::Run("r1".into()), run_complete())).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "enabled ⇒ spoken");
+        vm.set_enabled(false); // toggle off mid-stream
+        proj.handle(&ctx.publish(StreamId::Run("r1".into()), run_complete())).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "after toggle-off, no further speech (EC-006)");
+    }
+
+    // T019 / FR-014 — a TTS-down failure surfaces a typed error via VoiceStatus,
+    // without panicking the handler.
+    #[tokio::test]
+    async fn tts_failure_surfaces_via_voice_status() {
+        let bus = Arc::new(Bus::new(16));
+        let ctx = ctx(&bus);
+        let vm = enabled_vm();
+        let mut proj = VoiceProjection::new(Arc::new(FailingTts), Arc::clone(&vm));
+
+        // Handler returns Ok (no panic) even though synthesis failed.
+        proj.handle(&ctx.publish(StreamId::Run("r1".into()), run_complete())).await.unwrap();
+        assert_eq!(
+            vm.status().last_error.as_deref(),
+            Some("text-to-speech failed: sidecar down"),
+            "a TTS-down error is surfaced via VoiceStatus (FR-014)"
+        );
     }
 }

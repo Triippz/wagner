@@ -9,20 +9,27 @@
 use std::sync::Mutex;
 
 use crate::voice::router::VoiceRouter;
+use crate::voice::types::VoiceError;
 
 /// Snapshot of voice-feature state returned to the UI.
 ///
 /// Keyed `enabled`/`ready` (no rename) to match the IPC contract the UI lane
-/// depends on (`voice_status -> { enabled, ready }`).
+/// depends on (`voice_status -> { enabled, ready }`). `last_error` is additive
+/// (FR-014): the most recent typed [`VoiceError`], rendered for the UI, or `None`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VoiceStatus {
     pub enabled: bool,
     pub ready: bool,
+    /// The most recent typed voice error surfaced to the user, or `None`.
+    pub last_error: Option<String>,
 }
 
 struct Inner {
     enabled: bool,
     ready: bool,
+    /// Most recent typed [`VoiceError`] (Display), surfaced via [`VoiceStatus`]
+    /// (FR-014). Cleared on (re-)enable; set by [`VoiceManager::report_error`].
+    last_error: Option<String>,
     /// Pre-built router targeting the loopback sidecars. Used by the pipeline
     /// once the sidecars are up (Step 7+). ponytail: expose via a public
     /// accessor when the shell pipeline integration lands.
@@ -45,6 +52,7 @@ impl VoiceManager {
             inner: Mutex::new(Inner {
                 enabled: false,
                 ready: false,
+                last_error: None,
                 router: VoiceRouter::default_http(
                     "http://127.0.0.1:8771",
                     "http://127.0.0.1:8772",
@@ -59,7 +67,20 @@ impl VoiceManager {
         VoiceStatus {
             enabled: g.enabled,
             ready: g.ready,
+            last_error: g.last_error.clone(),
         }
+    }
+
+    /// Whether voice is currently enabled — the live toggle gate (FR-015) the
+    /// voice participants check before capturing, dispatching, or speaking.
+    pub fn enabled(&self) -> bool {
+        self.inner.lock().unwrap().enabled
+    }
+
+    /// Surface a typed voice error to the user (FR-014). Stores its `Display`
+    /// rendering in `last_error`; the next `status()` carries it to the UI.
+    pub fn report_error(&self, err: &VoiceError) {
+        self.inner.lock().unwrap().last_error = Some(err.to_string());
     }
 
     /// Flip the enabled flag. Does not touch `ready` — the shell layer controls
@@ -67,8 +88,11 @@ impl VoiceManager {
     pub fn set_enabled(&self, on: bool) {
         let mut g = self.inner.lock().unwrap();
         g.enabled = on;
-        // Disabling always clears ready too (sidecars are stopped).
-        if !on {
+        if on {
+            // Re-enabling clears any stale failure from a prior session.
+            g.last_error = None;
+        } else {
+            // Disabling always clears ready too (sidecars are stopped).
             g.ready = false;
         }
     }
@@ -153,5 +177,34 @@ mod tests {
         assert!(s.enabled);
         // ready is unaffected — still true
         assert!(s.ready);
+    }
+
+    // T019 / FR-014 — the three required typed errors each surface via VoiceStatus.
+
+    #[test]
+    fn default_has_no_error() {
+        assert_eq!(VoiceManager::new().status().last_error, None);
+    }
+
+    #[test]
+    fn each_typed_error_surfaces_via_status() {
+        for (err, want) in [
+            (VoiceError::MicDenied, "microphone access denied"),
+            (VoiceError::SttFailed("sidecar down".into()), "speech-to-text failed: sidecar down"),
+            (VoiceError::TtsFailed("sidecar down".into()), "text-to-speech failed: sidecar down"),
+        ] {
+            let vm = VoiceManager::new();
+            vm.report_error(&err); // typed in (no panic/unwrap) …
+            assert_eq!(vm.status().last_error.as_deref(), Some(want)); // … rendered out
+        }
+    }
+
+    #[test]
+    fn re_enabling_clears_a_stale_error() {
+        let vm = VoiceManager::new();
+        vm.report_error(&VoiceError::MicDenied);
+        assert!(vm.status().last_error.is_some());
+        vm.set_enabled(true);
+        assert_eq!(vm.status().last_error, None, "re-enable clears a prior failure");
     }
 }
