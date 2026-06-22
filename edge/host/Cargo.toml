@@ -37,10 +37,11 @@ similar = { workspace = true }
 # WebRTC APM (bundled/static, BSD-3-Clause; research R5). cpal/wake/VAD added as
 # their modules land.
 webrtc-audio-processing = { version = "2", features = ["bundled"], optional = true }
-# NOTE: VAD (voice_activity_detector 0.2.1) is BLOCKED — it needs `ort` rc.10's API,
-# but the existing wagner-tts-sidecar (Kokoro) pins `ort ^2.0.0-rc.12`, and cargo
-# unifies to one `ort` per workspace. See research.md R2 — needs a pure-Rust (tract)
-# Silero VAD or an rc.12-compatible crate. Resolve in the device session.
+# NOTE: VAD = `earshot` (pure-Rust embedded NN, no `ort`/ONNX) — resolves the former
+# `ort` rc.10↔rc.12 clash with wagner-tts-sidecar (Kokoro) by avoiding `ort` entirely.
+# Every Silero crate pins `ort =2.0.0-rc.10`, so Silero is out unless vendored via
+# tract by hand (R2 fallback). earshot accuracy is unbenchmarked → validate on-device.
+# Add `earshot` to voice-io when vad.rs (T028) lands.
 
 [features]
 # Compiles the native-audio path (cpal capture/playback, AEC). VAD pending (see above).

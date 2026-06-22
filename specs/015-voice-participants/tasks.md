@@ -12,7 +12,7 @@
 > - ✅ **Intake routing decision** — `edge/host/src/participants/voice_intake.rs` (`route_transcript`/`IntakeAction`/`to_command`, FR-005a/006/007). The pure routing; the capture→AEC→STT→dispatch wiring is deferred. Covers the logic half of T015/T016.
 > - ✅ **AEC3 (the #1 native risk) — DONE at the DSP level.** **T004 spike PASS**: `webrtc-audio-processing` `bundled` builds on macOS arm64 (needs meson+ninja — now installed). `edge/host/src/voice/aec.rs` (`EchoCanceller`, FR-011a) wraps APM AEC3, **2 tests green headless** (frame_len=160; processes a render+capture frame). Dep added **optional behind the `voice-io` feature** (T001/T003 partial) — default build unaffected (2.3s, clippy clean). Covers T004 + the DSP half of T009/T010. Frame-cadence corrected in research R5 (160-decoupled-from-512, not a 3×160 split).
 >
-> **VAD (T028) — BLOCKED (not device-gated; a dep conflict):** `voice_activity_detector 0.2.1` needs `ort` rc.10 but the existing Kokoro `wagner-tts-sidecar` pins `ort ^2.0.0-rc.12` (one `ort` per workspace) → won't compile. Needs a pure-Rust/tract Silero VAD or an rc.12-compatible crate (research R2). AEC is unaffected (no `ort`).
+> **VAD (T028) — RESOLVED 2026-06-21 (deep-research):** the `ort` rc.10↔rc.12 conflict is sidestepped by dropping Silero/`ort` for **`earshot` 1.1.0** — pure-Rust embedded-NN VAD, zero `ort`/ONNX (only optional `libm`), MIT/Apache, 256-sample/16 ms frames @ 16 kHz. No published crate provides a tract-based ort-free Silero (every Silero crate pins `ort =2.0.0-rc.10`). **Open: earshot's accuracy claim is unbenchmarked → measure on-device; fallback = vendor `tract-onnx` + Silero v5 `.onnx` by hand.** See research.md R2. (No longer dep-blocked; remaining VAD work is device-gated.)
 >
 > **Deferred (workstation/device-gated):** cpal capture/playback (real mic/speaker), wake.rs (needs a trained model T042), the participant Agent impls (handle/subscribe + capture/playback/AEC wiring), shell shortcuts + bundling + notarization (T041), wake-word training (T042), UI (T040), and the manual gates (T046). These need real audio devices, mic permission, or a trained model.
 
@@ -20,7 +20,7 @@
 
 ## Phase 1 — Setup (Shared Infrastructure)
 
-- [ ] T001 Add audio/voice deps to `edge/host/Cargo.toml`: `cpal`, `livekit-wakeword`, `voice_activity_detector`, `webrtc-audio-processing` (feature `bundled`), `ringbuf` (pin versions per research R1–R5).
+- [ ] T001 Add audio/voice deps to `edge/host/Cargo.toml`: `cpal`, `livekit-wakeword`, `earshot` (VAD — pure-Rust, no `ort`; per R2), `webrtc-audio-processing` (feature `bundled`), `ringbuf` (pin versions per research R1–R5).
 - [ ] T002 [P] Add scripted-PCM test fixtures (silence, spoken phrase, TTS-echo clip, "stop" clip, "stop wasting tokens" clip) under `edge/host/tests/fixtures/voice/`.
 - [ ] T003 [P] Add a `voice-io` cargo feature gate in `edge/host` so the native-audio path compiles out for pure-logic CI lanes.
 
@@ -79,7 +79,7 @@
 - [ ] T025 [P] [US2] Test: wake detection fires on the scripted phrase; the TTS-echo clip routed through AEC does NOT fire (self-trigger suppressed), in `edge/host/tests/unit/voice_wake.rs`.
 - [ ] T026 [P] [US2] Test: VAD endpointing bounds the post-wake utterance (speech-end), in `edge/host/tests/unit/voice_vad.rs`.
 - [ ] T027 [P] [US2] Implement `edge/host/src/voice/wake.rs` (livekit-wakeword; loads "Hey Wagner" model from app-data) (depends T025).
-- [ ] T028 [P] [US2] Implement `edge/host/src/voice/vad.rs` (`voice_activity_detector` Silero V5) (depends T026).
+- [ ] T028 [P] [US2] Implement `edge/host/src/voice/vad.rs` (`earshot`, pure-Rust embedded NN; 256-sample/16 ms frames; validate accuracy on-device, fallback to vendored tract+Silero — research R2) (depends T026).
 - [ ] T029 [US2] Wire the wake path: wake-hit → VAD-endpointed capture → **foundational intake (T016)**; degrade to PTT-only if wake/VAD fail to load (depends T016, T027, T028).
 
 **Checkpoint:** hands-free wake → submission works on the same foundational intake; self-echo suppressed via AEC; independent of US1's PTT trigger.

@@ -24,8 +24,11 @@ backed by adversarially-verified deep-research (the wake-word/VAD/cpal pass and 
 
 ## R2 — VAD (endpointing)
 
-- **Decision:** `voice_activity_detector` 0.2.x (MIT, **Silero VAD V5** via the `ort` crate),
-  512-sample frames @ 16 kHz.
+- **Decision (REVISED 2026-06-21 — see ✅ RESOLVED below):** `earshot` 1.1.0 (MIT/Apache, **pure-Rust
+  embedded NN**, no `ort`/ONNX), 256-sample (16 ms) frames @ 16 kHz mono f32. Supersedes the original
+  `voice_activity_detector`/Silero pick, which is unusable here (ort rc.10 ↔ rc.12 conflict, blocker below).
+- **Original decision (superseded):** `voice_activity_detector` 0.2.x (MIT, **Silero VAD V5** via the `ort`
+  crate), 512-sample frames @ 16 kHz.
 - **Rationale:** Substantially more accurate than WebRTC VAD (MCC 0.72 vs 0.41 at 50 ms); frame size
   matches the cpal capture + whisper input. [015 deep-research, 3-0 verified.]
 - **Alternatives considered:** WebRTC VAD (lighter, GMM, less accurate in noise); a pure-Rust
@@ -38,11 +41,31 @@ backed by adversarially-verified deep-research (the wake-word/VAD/cpal pass and 
   workspace (rc.12), and rc.12 broke the API the VAD crate uses (`.view()` on `Shape`) → it does not
   compile. Pinning `ort=rc.10` conflicts with tts-sidecar; bumping the VAD crate isn't possible (0.2.1
   is latest). **`voice_activity_detector` is therefore unusable in this workspace as-is.**
-  **Revised VAD options (decide in the device session):** (a) a **pure-Rust / tract** Silero VAD (no
-  `ort`, mirrors how livekit-wakeword avoids this via ort-tract) — preferred, sidesteps the ort coupling
-  entirely; (b) an rc.12-compatible Silero crate (`silero-vad-rust`?); (c) align tts-sidecar + VAD on one
-  `ort` (risky — touches the working Kokoro sidecar); (d) the degraded RMS-gate fallback. **AEC is
-  unaffected** — `webrtc-audio-processing` uses no `ort`.
+  **AEC is unaffected** — `webrtc-audio-processing` uses no `ort`.
+- **✅ RESOLVED (2026-06-21, deep-research — VAD crate selection):**
+  - **Chosen: `earshot` 1.1.0** (pykeio — the `ort` maintainers; MIT/Apache). **Pure Rust, zero `ort`/
+    ONNX/C** — runtime dep is only optional `libm`; the NN is embedded in the binary (~110 KiB total vs
+    Silero's 2 MiB model + ~8 MB ONNX runtime). 256-sample/16 ms frames @ 16 kHz f32; ~8 KiB/detector;
+    RTF 0.0007. Active (released 2026-04-15, 131★). **Sidesteps the `ort` conflict entirely** — the
+    host/VAD path links no `ort` at all, so the rc.10↔rc.12 clash simply disappears.
+  - **R4 interaction (corrected):** earshot does NOT eliminate R4 — the Kokoro `wagner-tts-sidecar` is a
+    *separate binary* that still pins `ort = 2.0.0-rc.12` (`download-binaries`) and still ships the ONNX
+    dylib. R4's bundling/notarization work remains for the sidecar; earshot only removes the VAD's
+    contribution, keeping `edge/host` `ort`-free.
+  - **Frame-size note:** 256 (earshot) vs the 512 originally planned for Silero — non-issue: R5 already
+    decouples the VAD-window cadence from the 512-window STT cadence.
+  - **⚠️ Unverified:** earshot's "more accurate than Silero v6" claim has **no published benchmark**, and
+    R2's MCC 0.72 was *Silero-specific* — it does NOT transfer. **Must measure accuracy on-device** (fits
+    the device-session gate; can't be measured headless anyway).
+  - **Fallback if on-device accuracy disappoints in noise: vendor `tract-onnx` + the Silero v5 `.onnx`
+    directly** — true Silero V5 quality, pure-Rust via `tract`, no `ort` crate, no dylib. More integration
+    work (manual LSTM hidden-state across frames), but proven; this is the "tract-based Silero" no published
+    crate provides. RMS-gate (MCC ~0.11) remains the degraded last resort.
+  - **Rejected:** all Silero-via-`ort` crates — `voice_activity_detector` 0.2.1 *and* its
+    `voice_activity_detector_silero_v5` fork *and* `silero-vad-rs`/`silero-vad-rust` all require `ort`, and
+    every Silero one pins **`=2.0.0-rc.10`** (verified on lib.rs/docs.rs) → irreconcilable with the sidecar's
+    rc.12 without touching the working Kokoro sidecar. `ort-tract` is a *backend for* `ort`, so it still
+    needs the conflicting `ort` crate — does not help.
 
 ## R3 — cpal capture/playback pattern
 
