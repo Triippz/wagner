@@ -90,82 +90,142 @@ pub fn encode_utterance(interleaved: &[f32], channels: u16, from_hz: u32) -> Aud
 #[cfg(feature = "voice-io")]
 pub use device::MicCapture;
 
+// MicCapture must be Send + Sync to live in Tauri-managed state between the PTT
+// start/stop IPC calls — the `!Send` cpal stream stays on its own thread.
+#[cfg(feature = "voice-io")]
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<MicCapture>();
+};
+
 #[cfg(feature = "voice-io")]
 mod device {
     use super::{encode_utterance, AudioChunk};
     use crate::voice::types::VoiceError;
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::thread::JoinHandle;
+    use std::time::Duration;
 
-    /// A held-to-talk microphone capture. [`start`](Self::start) opens the default
-    /// input stream and accumulates samples; [`stop`](Self::stop) ends it and
-    /// returns the utterance as a 16 kHz mono WAV [`AudioChunk`].
+    /// A held-to-talk microphone capture. The `cpal::Stream` is `!Send` on macOS,
+    /// so it lives entirely on a dedicated thread; this handle holds only `Send`
+    /// state and can sit in Tauri-managed state between the start and stop IPC
+    /// calls. [`start`](Self::start) opens the stream and accumulates samples;
+    /// [`stop`](Self::stop) ends it and returns a 16 kHz mono WAV [`AudioChunk`].
     pub struct MicCapture {
-        stream: cpal::Stream,
+        stop: Arc<AtomicBool>,
+        thread: Option<JoinHandle<()>>,
         buf: Arc<Mutex<Vec<f32>>>,
         channels: u16,
         sample_rate: u32,
     }
 
     impl MicCapture {
-        /// Open the default input device and start accumulating an utterance.
-        /// Returns [`VoiceError::MicDenied`] when no input device is available
-        /// (no permission / no device).
+        /// Open the default input device on a capture thread and start
+        /// accumulating an utterance. Returns [`VoiceError::MicDenied`] when no
+        /// input device is available (no permission / no device).
         pub fn start() -> Result<Self, VoiceError> {
-            let host = cpal::default_host();
-            let device = host.default_input_device().ok_or(VoiceError::MicDenied)?;
-            let config = device
-                .default_input_config()
-                .map_err(|e| VoiceError::SttFailed(format!("mic config: {e}")))?;
-            let channels = config.channels();
-            let sample_rate = config.sample_rate().0;
+            let stop = Arc::new(AtomicBool::new(false));
             let buf = Arc::new(Mutex::new(Vec::<f32>::new()));
-            let sink = Arc::clone(&buf);
-            let err_fn = |e| eprintln!("[wagner] voice-capture: mic stream error: {e}");
-            let cfg = config.config();
+            // The thread reports the live stream's format (or the build error) back
+            // once the stream is playing, so `start()` fails fast on a denied mic.
+            let (ready_tx, ready_rx) = mpsc::channel::<Result<(u16, u32), VoiceError>>();
+            let stop_t = Arc::clone(&stop);
+            let buf_t = Arc::clone(&buf);
 
-            // Accumulate as f32 regardless of the device's native sample format.
-            let stream = match config.sample_format() {
-                cpal::SampleFormat::F32 => device.build_input_stream(
-                    &cfg,
-                    move |data: &[f32], _: &_| sink.lock().unwrap().extend_from_slice(data),
-                    err_fn,
-                    None,
-                ),
-                cpal::SampleFormat::I16 => device.build_input_stream(
-                    &cfg,
-                    move |data: &[i16], _: &_| {
-                        let mut g = sink.lock().unwrap();
-                        g.extend(data.iter().map(|s| *s as f32 / i16::MAX as f32));
-                    },
-                    err_fn,
-                    None,
-                ),
-                cpal::SampleFormat::U16 => device.build_input_stream(
-                    &cfg,
-                    move |data: &[u16], _: &_| {
-                        let mut g = sink.lock().unwrap();
-                        g.extend(data.iter().map(|s| (*s as f32 / u16::MAX as f32) * 2.0 - 1.0));
-                    },
-                    err_fn,
-                    None,
-                ),
-                other => return Err(VoiceError::SttFailed(format!("unsupported sample format: {other:?}"))),
+            let thread = std::thread::spawn(move || {
+                let built = build_stream(&buf_t);
+                match built {
+                    Ok((stream, channels, sample_rate)) => {
+                        // Keep the `!Send` stream owned by this thread, alive until
+                        // stop is signalled — the callback fires on cpal's audio thread.
+                        let _ = ready_tx.send(Ok((channels, sample_rate)));
+                        while !stop_t.load(Ordering::Relaxed) {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        drop(stream);
+                    }
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                    }
+                }
+            });
+
+            match ready_rx.recv() {
+                Ok(Ok((channels, sample_rate))) => {
+                    Ok(Self { stop, thread: Some(thread), buf, channels, sample_rate })
+                }
+                Ok(Err(e)) => {
+                    let _ = thread.join();
+                    Err(e)
+                }
+                Err(_) => Err(VoiceError::SttFailed("capture thread exited before reporting".into())),
             }
-            .map_err(|e| VoiceError::SttFailed(format!("mic stream: {e}")))?;
-
-            stream
-                .play()
-                .map_err(|e| VoiceError::SttFailed(format!("mic play: {e}")))?;
-            Ok(Self { stream, buf, channels, sample_rate })
         }
 
-        /// Stop capture and return the held utterance as a 16 kHz mono WAV chunk.
-        pub fn stop(self) -> AudioChunk {
-            drop(self.stream); // halt the input callback before draining the buffer
+        /// Stop capture (join the thread) and return the held utterance as a
+        /// 16 kHz mono WAV chunk.
+        pub fn stop(mut self) -> AudioChunk {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
             let samples = self.buf.lock().unwrap();
             encode_utterance(&samples, self.channels, self.sample_rate)
         }
+    }
+
+    /// Open the default input device and build a playing stream that accumulates
+    /// f32 samples into `buf`, whatever the device's native sample format.
+    /// Returns the live stream plus its channel count and sample rate.
+    fn build_stream(buf: &Arc<Mutex<Vec<f32>>>) -> Result<(cpal::Stream, u16, u32), VoiceError> {
+        let host = cpal::default_host();
+        let device = host.default_input_device().ok_or(VoiceError::MicDenied)?;
+        let config = device
+            .default_input_config()
+            .map_err(|e| VoiceError::SttFailed(format!("mic config: {e}")))?;
+        let channels = config.channels();
+        let sample_rate = config.sample_rate().0;
+        let cfg = config.config();
+        let sink = Arc::clone(buf);
+        let err_fn = |e| eprintln!("[wagner] voice-capture: mic stream error: {e}");
+
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => device.build_input_stream(
+                &cfg,
+                move |data: &[f32], _: &_| sink.lock().unwrap().extend_from_slice(data),
+                err_fn,
+                None,
+            ),
+            cpal::SampleFormat::I16 => device.build_input_stream(
+                &cfg,
+                move |data: &[i16], _: &_| {
+                    let mut g = sink.lock().unwrap();
+                    g.extend(data.iter().map(|s| *s as f32 / i16::MAX as f32));
+                },
+                err_fn,
+                None,
+            ),
+            cpal::SampleFormat::U16 => device.build_input_stream(
+                &cfg,
+                move |data: &[u16], _: &_| {
+                    let mut g = sink.lock().unwrap();
+                    g.extend(data.iter().map(|s| (*s as f32 / u16::MAX as f32) * 2.0 - 1.0));
+                },
+                err_fn,
+                None,
+            ),
+            other => {
+                return Err(VoiceError::SttFailed(format!("unsupported sample format: {other:?}")))
+            }
+        }
+        .map_err(|e| VoiceError::SttFailed(format!("mic stream: {e}")))?;
+
+        stream
+            .play()
+            .map_err(|e| VoiceError::SttFailed(format!("mic play: {e}")))?;
+        Ok((stream, channels, sample_rate))
     }
 }
 
