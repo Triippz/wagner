@@ -17,6 +17,7 @@ pub mod oracle;
 pub mod panel;
 pub mod roster;
 pub mod run_loop;
+pub mod run_router;
 pub mod scheduler;
 pub mod workflow;
 pub mod workflow_exec;
@@ -29,6 +30,7 @@ pub use judge::{GoalVerdict, JudgeInputs, SuiteResult};
 pub use oracle::{OraclePlan, PlanError, PlannedSubtask};
 pub use roster::{Agent, Engine, Roster, RosterError};
 pub use run_loop::{run_goal, LoopDeps};
+pub use run_router::{RunCommandRouter, RunLaunch};
 pub use workflow::{
     builtin_templates, EdgeWhen, GateMode, NamedTemplate, StageKind, Workflow, WorkflowEdge,
     WorkflowError, WorkflowNode, WORKFLOW_SCHEMA,
