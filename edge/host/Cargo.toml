@@ -37,6 +37,10 @@ similar = { workspace = true }
 # WebRTC APM (bundled/static, BSD-3-Clause; research R5). cpal/wake/VAD added as
 # their modules land.
 webrtc-audio-processing = { version = "2", features = ["bundled"], optional = true }
+# Microphone/speaker device I/O (T006/T008). Default host (CoreAudio on macOS); the
+# `cpal::Stream` open is the only device-gated part of capture.rs — the framing,
+# resample, and WAV encode are pure and tested headless.
+cpal = { version = "0.15", optional = true }
 # NOTE: VAD = `earshot` (pure-Rust embedded NN, no `ort`/ONNX) — resolves the former
 # `ort` rc.10↔rc.12 clash with wagner-tts-sidecar (Kokoro) by avoiding `ort` entirely.
 # Every Silero crate pins `ort =2.0.0-rc.10`, so Silero is out unless vendored via
@@ -45,7 +49,7 @@ webrtc-audio-processing = { version = "2", features = ["bundled"], optional = tr
 
 [features]
 # Compiles the native-audio path (cpal capture/playback, AEC). VAD pending (see above).
-voice-io = ["dep:webrtc-audio-processing"]
+voice-io = ["dep:webrtc-audio-processing", "dep:cpal"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

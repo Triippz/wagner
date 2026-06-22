@@ -38,6 +38,7 @@
 //! | `router::{VoiceRouter, RouteRequest, EngineHandles}` | Engine selection |
 //! | `pipeline::{VoicePipeline, PipelineResult}` | STT→TTS sequencing |
 //! | `cancel::{classify_spoken, SpokenIntent}` | Best-effort spoken-cancel matcher (015 FR-005a) |
+//! | `capture::{encode_utterance, MicCapture, …}` | PTT mic capture → 16 kHz mono WAV (`MicCapture` is `voice-io`; transforms are pure) |
 //! | `aec::EchoCanceller` | Acoustic echo cancellation (`voice-io` feature, 015 FR-011a) |
 //! | `manager::{VoiceManager, VoiceStatus}` | Sidecar/runtime status for the shell layer |
 //! | `models::{download_models, models_status, …, MODELS}` | Model download manager for the shell layer |
@@ -45,6 +46,7 @@
 #[cfg(feature = "voice-io")]
 pub mod aec;
 pub mod cancel;
+pub mod capture;
 pub mod http_stt;
 pub mod http_tts;
 pub mod manager;
