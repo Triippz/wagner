@@ -1,13 +1,14 @@
 //! Voice intake participant (spec 015, US1/US2/US3-spoken) — turns a transcript
-//! into an action on the bus. The capture → AEC → STT wiring and the `Agent` impl
-//! land with the device layer; the **routing decision** below is pure,
-//! deterministic, and headless-testable (the shared path both PTT and wake feed).
+//! into an action on the bus. The capture → AEC → STT wiring is device-gated and
+//! publishes `voice.utterance_transcribed`; the `Agent` impl (subscribe + dispatch)
+//! and the **routing decision** below are both headless-testable
+//! (the shared path both PTT and wake feed).
 //!
 //! Routing (FR-005a / FR-006 / FR-007):
 //! 1. A best-effort **spoken cancel** ("stop", "never mind") → [`IntakeAction::Cancel`]
-//!    (the participant delivers this to `registry.cancel` directly — the council's
-//!    deterministic abort lives on the *physical* control; this spoken path is the
-//!    flexible convenience).
+//!    (the participant dispatches `run.abort` through the bounded command intake;
+//!    failure is swallowed on backpressure — the *physical* control carries the
+//!    deterministic abort guarantee; this spoken path is the flexible convenience).
 //! 2. Otherwise it is **free-form**: a **focused run** → [`IntakeAction::Steer`];
 //!    no focused run → [`IntakeAction::StartRun`].
 
@@ -22,9 +23,10 @@ use crate::bus::{
 use crate::state::RunStatus;
 use crate::voice::{classify_spoken, SpokenIntent};
 
-/// What a transcript routes to. The participant maps `Cancel` to `registry.cancel`
-/// (bypassing dispatch, per the 014 abort path); `StartRun`/`Steer` map to a
-/// validated [`Command`] via [`IntakeAction::to_command`].
+/// What a transcript routes to. The participant dispatches `RunCommand::Abort` for
+/// `Cancel` through the bounded command intake (best-effort; swallowed on backpressure
+/// — the physical control carries the deterministic abort guarantee).
+/// `StartRun`/`Steer` map to a validated [`Command`] via [`IntakeAction::to_command`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntakeAction {
     /// Best-effort spoken cancel → run-cancel action.
@@ -37,9 +39,11 @@ pub enum IntakeAction {
 
 /// Route a transcript given the currently focused run, if any (FR-006/FR-007).
 ///
-/// `focused_run` is a snapshot taken at dispatch time. EC-007 (the focused run
-/// terminates while the utterance was being transcribed) is handled by the caller
-/// re-checking liveness and passing `None` — a terminal run is never steered.
+/// `focused_run` reflects the state maintained reactively by the `Snapshot`/`Finished`
+/// handlers in `handle()`. EC-007 (the focused run terminates while the utterance was
+/// being transcribed) is handled by those handlers clearing `focused_run` when a run
+/// becomes terminal — so by the time `act_on_transcript` reads it, a terminal run's id
+/// has already been cleared and `None` is passed here without an explicit liveness check.
 pub fn route_transcript(transcript: &str, focused_run: Option<&str>) -> IntakeAction {
     if classify_spoken(transcript) == SpokenIntent::Cancel {
         return IntakeAction::Cancel;
@@ -53,8 +57,10 @@ pub fn route_transcript(transcript: &str, focused_run: Option<&str>) -> IntakeAc
 
 impl IntakeAction {
     /// The validated [`Command`] for the free-form actions. `Cancel` returns `None`
-    /// because the spoken cancel is delivered to `registry.cancel` directly, not
-    /// through the command intake (014 abort path).
+    /// because the spoken cancel is dispatched directly by the caller via
+    /// `ctx.dispatch(RunCommand::Abort, …)` in `act_on_transcript` (best-effort,
+    /// swallowed on backpressure). Called by `act_on_transcript` for the
+    /// `StartRun`/`Steer` arms so the mapping lives in exactly one place.
     pub fn to_command(&self) -> Option<Command> {
         match self {
             IntakeAction::Cancel => None,
@@ -105,15 +111,22 @@ impl VoiceIntake {
                 Ok(())
             }
             // Free-form → a validated start/steer through the one authorized intake.
-            // Here a dispatch error (backpressure/denied) is a real failure, surfaced.
-            action => match action.to_command() {
-                Some(cmd) => self
-                    .ctx
+            // `to_command()` owns the action→Command mapping; to_command()'s exhaustive
+            // match is the compile-time guard: adding a variant to IntakeAction without
+            // updating to_command() is a compile error there.
+            action => {
+                let cmd = action.to_command().ok_or_else(|| {
+                    AgentError::Other("IntakeAction variant returned no command".into())
+                })?;
+                self.ctx
                     .dispatch(cmd, self.authz.as_ref())
                     .map(|_| ())
-                    .map_err(|e| AgentError::Other(e.to_string())),
-                None => Ok(()),
-            },
+                    .map_err(|e| {
+                        let err = AgentError::Other(e.to_string());
+                        eprintln!("[wagner] voice-intake: dispatch failed: {err}");
+                        err
+                    })
+            }
         }
     }
 }
@@ -140,6 +153,13 @@ impl Agent for VoiceIntake {
             }
             // Re-check liveness from the run's own state (EC-007): a live run becomes
             // the focus; a terminal snapshot of the focused run clears it.
+            //
+            // Safety of the unconditional first branch: the registry enforces a
+            // single-session invariant — at most one run is Running/Paused at a time —
+            // so two live snapshots for different runs cannot coexist. If that invariant
+            // is ever relaxed, replace this with a guard: only set when focused_run is
+            // None (ponytail: single-session heuristic; replace with an explicit UI focus
+            // signal when multi-run focus lands).
             Event::Run(RunEvent::Snapshot(run)) => {
                 if matches!(run.status, RunStatus::Running | RunStatus::Paused) {
                     self.focused_run = Some(run.run_id.clone());
@@ -285,6 +305,53 @@ mod agent_tests {
         intake.handle(&env(transcribed("stop"))).await.unwrap();
         let cmd = cmds.try_recv().expect("a command was dispatched");
         assert_eq!(cmd.command, Command::Run(RunCommand::Abort { run_id: Some("r7".into()) }));
+    }
+
+    #[tokio::test]
+    async fn terminal_snapshot_clears_focus_so_next_utterance_starts() {
+        // Path (b): a RunEvent::Snapshot with a non-live status clears focused_run (EC-007).
+        let (mut intake, mut cmds) = intake_with_cmds();
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(live_run("r9")))))).await.unwrap();
+        assert_eq!(intake.focused_run(), Some("r9"), "live snapshot sets the focus");
+        // Send a terminal snapshot (Met) for the same run.
+        let mut met = live_run("r9");
+        met.status = RunStatus::Met;
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(met))))).await.unwrap();
+        assert_eq!(intake.focused_run(), None, "terminal snapshot clears the focus (EC-007)");
+        // Next utterance must dispatch Start, not Steer.
+        intake.handle(&env(transcribed("brand new task"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(cmd.command, Command::Run(RunCommand::Start { goal: "brand new task".into() }));
+    }
+
+    #[tokio::test]
+    async fn paused_snapshot_promotes_focus_and_steer_reaches_it() {
+        // Exercises the `RunStatus::Paused` branch of the Snapshot handler —
+        // a mutation changing `| RunStatus::Paused` to anything else should fail here.
+        let (mut intake, mut cmds) = intake_with_cmds();
+        let mut paused = live_run("r-paused");
+        paused.status = RunStatus::Paused;
+        intake.handle(&env(Event::Run(RunEvent::Snapshot(Box::new(paused))))).await.unwrap();
+        assert_eq!(intake.focused_run(), Some("r-paused"), "a Paused snapshot sets the focus");
+        intake.handle(&env(transcribed("resume from checkpoint"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(
+            cmd.command,
+            Command::Run(RunCommand::Steer { run_id: "r-paused".into(), text: "resume from checkpoint".into() })
+        );
+    }
+
+    #[tokio::test]
+    async fn spoken_cancel_with_no_focus_dispatches_abort_run_id_none() {
+        // Exercises the `focused_run = None` path: Abort { run_id: None } tells the
+        // executor to abort the single live session (the "council" semantic).
+        // A mutation replacing `self.focused_run.clone()` with `Some(hardcoded_id)`
+        // would cause this assertion to fail.
+        let (mut intake, mut cmds) = intake_with_cmds();
+        // No Snapshot sent — focused_run stays None.
+        intake.handle(&env(transcribed("stop"))).await.unwrap();
+        let cmd = cmds.try_recv().expect("a command was dispatched");
+        assert_eq!(cmd.command, Command::Run(RunCommand::Abort { run_id: None }));
     }
 
     #[tokio::test]

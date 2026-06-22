@@ -1,8 +1,9 @@
 //! Voice projection participant (spec 015, US4) — speaks an **allowlist** of bus
 //! events aloud via the existing `Tts` port, and stays silent on everything else
-//! (FR-009). The audio-playing `Agent` impl (subscribe → `Tts` → cpal playback)
-//! lands with the device layer; the **speak policy** below is pure, deterministic,
-//! and headless-testable so the allowlist is verified without any audio.
+//! (FR-009). The `Agent` impl (subscribe → allowlist filter → `Tts` synthesis) is
+//! headless-testable and lives here; the cpal playback of the synthesised
+//! `SpeechChunk` is device-gated (T038/T008). The **speak policy**
+//! (`speakable_text`) is pure and deterministic.
 //!
 //! Allowlist (FR-009), mapped onto the current `RunEvent` taxonomy:
 //! - `Finished { ok: true }`  → "Run complete."
@@ -59,10 +60,9 @@ impl Agent for VoiceProjection {
     async fn handle(&mut self, envelope: &Envelope) -> Result<(), AgentError> {
         if let Some(text) = speakable_text(&envelope.payload) {
             // ponytail: synthesise only — playback (cpal) is the device-gated half (T038).
-            self.tts
-                .synthesise(&text)
-                .await
-                .map_err(|e| AgentError::Other(e.to_string()))?;
+            if let Err(e) = self.tts.synthesise(&text).await {
+                eprintln!("[wagner] voice-projection: tts synthesis failed: {e}");
+            }
         }
         Ok(())
     }
@@ -118,9 +118,9 @@ mod agent_tests {
     use crate::voice::types::{SpeechChunk, VoiceError};
     use serde_json::json;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Mutex;
 
-    /// A `Tts` that counts synthesis calls (the shipped `FakeTts` doesn't), so the
-    /// allowlist gate is asserted by *invocation count* — the SC-004 contract.
+    /// A `Tts` that counts synthesis calls — used to assert the SC-004 silence contract.
     struct CountingTts {
         calls: Arc<AtomicU32>,
     }
@@ -128,6 +128,20 @@ mod agent_tests {
     impl Tts for CountingTts {
         async fn synthesise(&self, text: &str) -> Result<SpeechChunk, VoiceError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(SpeechChunk::new(text.as_bytes().to_vec(), text))
+        }
+    }
+
+    /// A `Tts` that captures every synthesised phrase in order, so the round-trip
+    /// through `VoiceProjection::handle` can be asserted phrase-by-phrase (not just
+    /// by call count). A mutation that swaps phrases would be caught here.
+    struct CapturingTts {
+        phrases: Arc<Mutex<Vec<String>>>,
+    }
+    #[async_trait]
+    impl Tts for CapturingTts {
+        async fn synthesise(&self, text: &str) -> Result<SpeechChunk, VoiceError> {
+            self.phrases.lock().unwrap().push(text.to_string());
             Ok(SpeechChunk::new(text.as_bytes().to_vec(), text))
         }
     }
@@ -143,10 +157,11 @@ mod agent_tests {
 
     #[tokio::test]
     async fn speaks_each_allowlisted_event() {
-        let calls = Arc::new(AtomicU32::new(0));
+        let phrases = Arc::new(Mutex::new(Vec::<String>::new()));
         let bus = Arc::new(Bus::new(16));
         let ctx = ctx(&bus);
-        let mut proj = VoiceProjection::new(Arc::new(CountingTts { calls: Arc::clone(&calls) }));
+        let mut proj =
+            VoiceProjection::new(Arc::new(CapturingTts { phrases: Arc::clone(&phrases) }));
 
         for ev in [
             Event::Run(RunEvent::Finished { run_id: "r1".into(), ok: true }),
@@ -155,7 +170,12 @@ mod agent_tests {
         ] {
             proj.handle(&ctx.publish(StreamId::Run("r1".into()), ev)).await.unwrap();
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 3, "all three allowlisted events spoke");
+        let spoken = phrases.lock().unwrap();
+        assert_eq!(
+            spoken.as_slice(),
+            ["Run complete.", "Run stopped.", "Waiting for your approval."],
+            "allowlisted events must produce the exact phrases in order"
+        );
     }
 
     #[tokio::test]
