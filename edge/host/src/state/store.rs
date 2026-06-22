@@ -137,9 +137,28 @@ mod tests {
     // guard (D-TEST-4) lands when the host gains a run-sync-to-hub path.
     #[test]
     fn run_state_contract_admits_no_raw_voice_field() {
+        // Walk every `properties` map in the schema (top-level + nested `$defs`) so a
+        // raw-voice field buried in a sub-object can't slip past the guard.
+        fn collect_property_keys(node: &serde_json::Value, out: &mut Vec<String>) {
+            match node {
+                serde_json::Value::Object(map) => {
+                    if let Some(serde_json::Value::Object(props)) = map.get("properties") {
+                        out.extend(props.keys().cloned());
+                    }
+                    map.values().for_each(|v| collect_property_keys(v, out));
+                }
+                serde_json::Value::Array(items) => {
+                    items.iter().for_each(|v| collect_property_keys(v, out));
+                }
+                _ => {}
+            }
+        }
+
         let schema: serde_json::Value = serde_json::from_str(RUN_STATE_SCHEMA).unwrap();
-        let props = schema["properties"].as_object().expect("run-state schema has properties");
-        for key in props.keys() {
+        let mut keys = Vec::new();
+        collect_property_keys(&schema, &mut keys);
+        assert!(!keys.is_empty(), "run-state schema must expose properties to guard");
+        for key in &keys {
             let k = key.to_lowercase();
             assert!(
                 !(k.contains("audio") || k.contains("transcript") || k.contains("utterance") || k.contains("pcm")),

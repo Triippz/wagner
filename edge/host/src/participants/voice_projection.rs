@@ -70,7 +70,9 @@ impl Agent for VoiceProjection {
             // ponytail: synthesise only — playback (cpal) is the device-gated half (T038).
             if let Err(e) = self.tts.synthesise(&text).await {
                 // FR-014: surface the typed TTS-down error via VoiceStatus (no panic).
-                // `e` is already a `VoiceError` (often `TtsFailed`) — report it verbatim.
+                // `e` is already a `VoiceError` (often `TtsFailed`) — report it verbatim,
+                // and leave a stderr breadcrumb for device-side debugging.
+                eprintln!("[wagner] voice-projection: tts synthesis failed: {e}");
                 self.voice.report_error(&e);
             }
         }
