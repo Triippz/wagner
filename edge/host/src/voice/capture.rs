@@ -165,8 +165,11 @@ mod device {
         }
 
         /// Stop capture (join the thread) and return the held utterance as a
-        /// 16 kHz mono WAV chunk.
-        pub fn stop(mut self) -> AudioChunk {
+        /// 16 kHz mono WAV chunk. Returns [`VoiceError::MicDenied`] when the stream
+        /// delivered only silence (a denied mic permission on macOS feeds a valid
+        /// but all-zero stream) so callers surface a clear error instead of
+        /// transcribing silence into a bogus goal.
+        pub fn stop(mut self) -> Result<AudioChunk, VoiceError> {
             self.stop.store(true, Ordering::Relaxed);
             if let Some(t) = self.thread.take() {
                 let _ = t.join();
@@ -185,7 +188,12 @@ mod device {
                 self.sample_rate,
                 self.channels,
             );
-            encode_utterance(&samples, self.channels, self.sample_rate)
+            // Pure silence (exact zeros) means the OS gave us no audio — almost
+            // always a denied mic permission. Real ambient noise is well above this.
+            if peak < 1e-5 {
+                return Err(VoiceError::MicDenied);
+            }
+            Ok(encode_utterance(&samples, self.channels, self.sample_rate))
         }
     }
 

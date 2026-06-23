@@ -1284,7 +1284,12 @@ pub async fn voice_ptt_stop(
         .unwrap()
         .take()
         .ok_or("no capture in progress")?;
-    let audio = mic.stop();
+    // A pure-silence capture (peak ≈ 0) returns MicDenied — surface it rather than
+    // transcribing zeros into a bogus goal.
+    let audio = mic.stop().map_err(|e| {
+        vm.report_error(&e);
+        e.to_string()
+    })?;
     let transcript = ptt.stt.transcribe(audio).await.map_err(|e| {
         vm.report_error(&e);
         e.to_string()
