@@ -56,6 +56,20 @@ pub fn route_transcript(transcript: &str, focused_run: Option<&str>) -> IntakeAc
     }
 }
 
+/// Whether a transcript carries an actual instruction. Whisper emits bracketed /
+/// parenthesised markers for non-speech audio (`[BLANK_AUDIO]`, `[INAUDIBLE]`,
+/// `(silence)`, …); a transcript that is empty or *entirely* such a marker carries
+/// no instruction, so the intake ignores it — silence never starts or steers a run.
+pub fn is_actionable_speech(transcript: &str) -> bool {
+    let t = transcript.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let fully_bracketed = (t.starts_with('[') && t.ends_with(']'))
+        || (t.starts_with('(') && t.ends_with(')'));
+    !fully_bracketed
+}
+
 impl IntakeAction {
     /// The validated [`Command`] for the free-form actions. `Cancel` returns `None`
     /// because the spoken cancel is dispatched directly by the caller via
@@ -102,6 +116,10 @@ impl VoiceIntake {
 
     /// Route a transcript and act on the bus (FR-005a/006/007).
     fn act_on_transcript(&self, transcript: &str) -> Result<(), AgentError> {
+        // Drop non-speech (silence/inaudible) so it never starts or steers a run.
+        if !is_actionable_speech(transcript) {
+            return Ok(());
+        }
         match route_transcript(transcript, self.focused_run.as_deref()) {
             IntakeAction::Cancel => {
                 // Best-effort spoken cancel (council): dispatch `run.abort` for the
@@ -192,6 +210,18 @@ mod tests {
     fn spoken_cancel_routes_to_cancel_regardless_of_focus() {
         assert_eq!(route_transcript("stop", Some("r1")), IntakeAction::Cancel);
         assert_eq!(route_transcript("never mind", None), IntakeAction::Cancel);
+    }
+
+    #[test]
+    fn non_speech_markers_are_not_actionable() {
+        // Whisper's silence/inaudible markers carry no instruction.
+        for marker in ["", "   ", "[BLANK_AUDIO]", "[ Silence ]", "(silence)", "[INAUDIBLE]"] {
+            assert!(!is_actionable_speech(marker), "{marker:?} must be non-actionable");
+        }
+        // Real speech — including a goal that merely contains brackets — is actionable.
+        for speech in ["research the voice landscape", "stop wasting tokens", "(note) do the thing"] {
+            assert!(is_actionable_speech(speech), "{speech:?} must be actionable");
+        }
     }
 
     #[test]
@@ -301,6 +331,14 @@ mod agent_tests {
         intake.handle(&env(transcribed("research the landscape"))).await.unwrap();
         let cmd = cmds.try_recv().expect("a command was dispatched");
         assert_eq!(cmd.command, Command::Run(RunCommand::Start { goal: "research the landscape".into() }));
+    }
+
+    #[tokio::test]
+    async fn blank_audio_dispatches_no_command() {
+        // Silence (whisper's "[BLANK_AUDIO]") must never start a run.
+        let (mut intake, mut cmds) = intake_with_cmds();
+        intake.handle(&env(transcribed("[BLANK_AUDIO]"))).await.unwrap();
+        assert!(cmds.try_recv().is_err(), "non-speech must dispatch nothing");
     }
 
     #[tokio::test]

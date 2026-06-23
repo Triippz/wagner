@@ -172,6 +172,19 @@ mod device {
                 let _ = t.join();
             }
             let samples = self.buf.lock().unwrap();
+            // Diagnostic so a silent capture is distinguishable from an empty one:
+            //   0 samples            → the stream never delivered audio (device/timing)
+            //   samples, peak ≈ 0.0  → captured silence (mic permission denied / muted)
+            //   samples, peak > 0    → real audio reached us
+            let peak = samples.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+            let secs = samples.len() as f32
+                / (self.sample_rate.max(1) * u32::from(self.channels.max(1))) as f32;
+            eprintln!(
+                "[wagner] voice-capture: {} samples @ {} Hz, {} ch ({secs:.2}s), peak {peak:.4}",
+                samples.len(),
+                self.sample_rate,
+                self.channels,
+            );
             encode_utterance(&samples, self.channels, self.sample_rate)
         }
     }
