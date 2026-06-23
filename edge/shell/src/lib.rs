@@ -87,6 +87,34 @@ fn request_microphone_access() {
     }
 }
 
+/// The macOS microphone TCC authorization status: 0 not-determined, 1 restricted,
+/// 2 denied, 3 authorized (`-1` if AVFoundation can't be resolved). Lets us tell a
+/// permission problem (denied) from a device/capture one (authorized but silent).
+#[cfg(target_os = "macos")]
+pub fn mic_auth_status() -> isize {
+    use objc2::msg_send;
+    use objc2::runtime::AnyClass;
+    use objc2_foundation::NSString;
+
+    let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+        return -1;
+    };
+    let media_type = NSString::from_str("soun");
+    unsafe { msg_send![cls, authorizationStatusForMediaType: &*media_type] }
+}
+
+/// Human-readable [`mic_auth_status`].
+#[cfg(target_os = "macos")]
+pub fn mic_auth_status_str() -> &'static str {
+    match mic_auth_status() {
+        0 => "not-determined",
+        1 => "restricted",
+        2 => "denied",
+        3 => "authorized",
+        _ => "unknown",
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

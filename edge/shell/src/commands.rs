@@ -1285,10 +1285,15 @@ pub async fn voice_ptt_stop(
         .take()
         .ok_or("no capture in progress")?;
     // A pure-silence capture (peak ≈ 0) returns MicDenied — surface it rather than
-    // transcribing zeros into a bogus goal.
+    // transcribing zeros into a bogus goal. Include the macOS TCC status so a
+    // permission problem (denied) is distinguishable from a device one (authorized
+    // but silent).
     let audio = mic.stop().map_err(|e| {
         vm.report_error(&e);
-        e.to_string()
+        let detail = e.to_string();
+        #[cfg(target_os = "macos")]
+        let detail = format!("{detail} (macOS mic authorization: {})", crate::mic_auth_status_str());
+        detail
     })?;
     let transcript = ptt.stt.transcribe(audio).await.map_err(|e| {
         vm.report_error(&e);
