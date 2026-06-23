@@ -48,3 +48,9 @@ shell-words = "1"
 # of tao with the `NSWindow` feature, so this pulls in nothing new.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSWindow"] }
+# Request microphone access via AVFoundation at startup — cpal's CoreAudio input
+# does NOT trigger the macOS TCC prompt on its own, so without this the mic is
+# silently denied (all-zero samples). Already in the tree via objc2-app-kit.
+objc2 = "0.6"
+objc2-foundation = "0.3"
+block2 = "0.6"

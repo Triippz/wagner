@@ -52,6 +52,41 @@ fn hide_main_window(app: &tauri::AppHandle) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
+/// Ask macOS for microphone access via AVFoundation. cpal opens the mic through
+/// CoreAudio, which does **not** raise the TCC permission prompt on its own — so
+/// without this the system silently denies access and feeds all-zero samples
+/// (the `[BLANK_AUDIO]` / MicDenied symptom). Calling it at startup raises the
+/// prompt once; the grant then lets capture work. No-op if AVFoundation can't be
+/// resolved.
+#[cfg(target_os = "macos")]
+fn request_microphone_access() {
+    use block2::RcBlock;
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, Bool};
+    use objc2_foundation::NSString;
+
+    let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+        eprintln!("[wagner] mic-permission: AVCaptureDevice unavailable");
+        return;
+    };
+    // AVMediaTypeAudio is the NSString "soun" — pass it directly. The completion
+    // handler is required; we only need the prompt to fire and the grant to
+    // persist in TCC for the next capture.
+    let media_type = NSString::from_str("soun");
+    let handler = RcBlock::new(|granted: Bool| {
+        if !granted.as_bool() {
+            eprintln!("[wagner] mic-permission: microphone access denied by user");
+        }
+    });
+    unsafe {
+        let _: () = msg_send![
+            cls,
+            requestAccessForMediaType: &*media_type,
+            completionHandler: &*handler,
+        ];
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -65,6 +100,10 @@ pub fn run() {
         .manage(voice_lifecycle::SidecarState::new())
         .manage(commands::PttState::new())
         .setup(|app| {
+            // Raise the macOS microphone permission prompt early (cpal won't).
+            #[cfg(target_os = "macos")]
+            request_microphone_access();
+
             // Open (or create) the persistent memory store under the app-data dir.
             // Done synchronously (block_on) so the store is managed BEFORE any
             // command can run — managing it from a spawned task would race the
