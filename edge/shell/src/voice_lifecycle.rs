@@ -180,8 +180,16 @@ pub async fn sidecars_healthy() -> bool {
         "http://127.0.0.1:8771/health",
         "http://127.0.0.1:8772/health",
     ] {
+        // Adoption only needs to know the sidecar is *serving* on its port. A
+        // running sidecar that 404s `/health` (e.g. an older build without the
+        // route) is up and adoptable — accept it. Only a 5xx (loading/unhealthy)
+        // or a failed connection (nothing listening) counts as not-ready. This
+        // keeps voice-enable robust instead of falling through to spawning the
+        // (possibly placeholder) bundled binaries in dev.
         match client.get(url).send().await {
-            Ok(resp) if resp.status().is_success() => {}
+            Ok(resp)
+                if resp.status().is_success()
+                    || resp.status() == reqwest::StatusCode::NOT_FOUND => {}
             _ => return false,
         }
     }
