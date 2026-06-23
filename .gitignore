@@ -34,3 +34,6 @@ hooks/careful-state.json
 
 # CodeGraph local index (tooling)
 .codegraph/
+
+# Local ad-hoc-signed dev app (scripts/dev-app.sh) - build artifact
+WagnerDev.app/
