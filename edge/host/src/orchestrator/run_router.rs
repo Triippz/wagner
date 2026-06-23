@@ -169,4 +169,76 @@ mod tests {
         // Both were routed even though the first errored.
         assert_eq!(fake.launched.lock().unwrap().len(), 2, "router survives a launch error");
     }
+
+    /// UI-independent proof of the whole voice→run chain: register `VoiceIntake` on
+    /// a real registry + bus (exactly as the shell does), run the router with a
+    /// signaling launcher, publish a transcript, and assert a run launches with that
+    /// goal. No UI, no mic, no sidecars — this survives any UI rewrite.
+    #[tokio::test]
+    async fn published_utterance_launches_a_run_through_the_full_bus_chain() {
+        use crate::bus::{
+            AgentRegistry, AllowAll, Bus, Event, NodeId, ParticipantId, ParticipantKind, StreamId,
+            VoiceEvent,
+        };
+        use crate::participants::VoiceIntake;
+        use crate::voice::VoiceManager;
+        use tokio::sync::mpsc;
+
+        fn pid(name: &str) -> ParticipantId {
+            ParticipantId {
+                node: NodeId("local".into()),
+                kind: ParticipantKind::Agent,
+                name: name.into(),
+                instance: "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap(),
+            }
+        }
+
+        /// Signals the goal it was asked to launch (so the test can await it).
+        struct SignalingLaunch {
+            tx: mpsc::UnboundedSender<String>,
+        }
+        #[async_trait]
+        impl RunLaunch for SignalingLaunch {
+            async fn launch(&self, goal: String) -> Result<String, String> {
+                let _ = self.tx.send(goal);
+                Ok("run-1".into())
+            }
+            async fn steer(&self, _: String, _: String) -> Result<(), String> {
+                Ok(())
+            }
+            async fn abort(&self, _: Option<String>) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        let bus = Arc::new(Bus::new(64));
+        let commands = bus.take_commands().expect("command intake");
+        let registry = AgentRegistry::new(Arc::clone(&bus));
+
+        // Register VoiceIntake (voice enabled) — the same wiring lib.rs does.
+        let vm = Arc::new(VoiceManager::new());
+        vm.set_enabled(true);
+        let ctx = registry.context(pid("voice-intake"));
+        registry.spawn(Box::new(VoiceIntake::new(ctx, Arc::new(AllowAll), vm)));
+
+        // Run the router with a signaling launcher.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let router = RunCommandRouter::new(Arc::new(SignalingLaunch { tx }));
+        tokio::spawn(async move { router.run(commands).await });
+
+        // Publish an utterance — no run focused → it becomes a new-run goal.
+        registry.context(pid("voice-capture")).publish(
+            StreamId::Workspace("voice".into()),
+            Event::Voice(VoiceEvent::UtteranceTranscribed {
+                text: "research the voice landscape".into(),
+            }),
+        );
+
+        // Within a bounded wait, the chain must launch a run with that exact goal.
+        let goal = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("voice→run chain did not launch within 2s")
+            .expect("launch channel closed");
+        assert_eq!(goal, "research the voice landscape");
+    }
 }
